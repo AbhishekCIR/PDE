@@ -40,7 +40,7 @@ class BESS_Simulator:
         
         return df
 
-    def run_optimization_dispatch(self, df):
+    def run_optimization_dispatch(self, df, progress_callback=None):
         """
         Runs rigorous MILP co-optimization day-by-day.
         Solves 365 separate 24h problems handling strict limits of 1 discrete charge cycle and 1 discharge cycle per day.
@@ -70,7 +70,10 @@ class BESS_Simulator:
         # This keeps the model incredibly fast while perfectly enforcing "once a day" limits.
         dates = df['timestamp'].dt.date.unique()
         
-        for date_val in tqdm(dates, desc='Solving Daily Optimization'):
+        for i, date_val in enumerate(tqdm(dates, desc='Solving Daily Optimization')):
+            if progress_callback:
+                progress_callback(i, len(dates))
+            
             day_mask = (df['timestamp'].dt.date == date_val)
             day_indices = df.index[day_mask].tolist()
             T_day = len(day_indices)

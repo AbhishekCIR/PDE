@@ -26,15 +26,18 @@ st.sidebar.info("Modify these parameters to test different scenarios instantly."
 
 # Main area: File uploader
 st.write("### 1. Upload Hourly Pricing Data")
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
-st.markdown("*Note: Your CSV must contain columns literally named `timestamp`, `LMP`, and `Reg_Price`.*")
+uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
+st.markdown("*Note: Your file must contain columns literally named `timestamp`, `LMP`, and `Reg_Price`.*")
 
 data_df = None
 
-# Logic for handling the CSV file
+# Logic for handling the CSV or Excel file
 if uploaded_file is not None:
     try:
-        data_df = pd.read_csv(uploaded_file)
+        if uploaded_file.name.endswith('.csv'):
+            data_df = pd.read_csv(uploaded_file)
+        else:
+            data_df = pd.read_excel(uploaded_file)
         # Ensure timestamp is datetime
         if 'timestamp' in data_df.columns:
             data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
@@ -60,7 +63,7 @@ st.write("Once your data is loaded, you can run the MILP engine. This may take u
 
 if data_df is not None:
     if st.button("🚀 Run Optimization", type="primary"):
-        with st.spinner("Solving daily MILP equations... Please wait..."):
+        with st.spinner("Preparing Optimization Engine..."):
             try:
                 # 1. Initialize simulator with sidebar parameters
                 simulator = BESS_Simulator(
@@ -72,10 +75,18 @@ if data_df is not None:
                     degradation_cost_per_mwh=deg_cost
                 )
                 
-                # 2. Run the optimization over the DataFrame
-                df_opt = simulator.run_optimization_dispatch(data_df)
+                # 2. Add Progress Bar and Callback
+                progress_bar = st.progress(0, text="Solving daily MILP equations...")
+                def update_progress(current, total):
+                    progress_bar.progress((current + 1) / total, text=f"Solving Optimization: Day {current + 1} of {total}")
+
+                # 3. Run the optimization over the DataFrame
+                df_opt = simulator.run_optimization_dispatch(data_df, progress_callback=update_progress)
                 
-                # 3. Calculate metrics
+                # Clear the progress bar after completion
+                progress_bar.empty()
+                
+                # 4. Calculate metrics
                 metrics, utilization = simulator.calculate_summary_metrics(df_opt)
                 
                 # --- DISPLAY RESULTS ---
@@ -102,14 +113,84 @@ if data_df is not None:
                 st.dataframe(df_opt, use_container_width=True)
                 
                 # --- PREPARE DATA FOR DOWNLOAD ---
-                csv_buffer = io.BytesIO()
-                df_opt.to_csv(csv_buffer, index=False)
+                cols_to_keep = ['timestamp', 'LMP', 'Reg_Price', 'charge_mw', 'discharge_mw', 
+                                'reg_mw', 'soc_mwh', 'energy_revenue', 'reg_revenue', 'revenue', 'decision']
+                
+                # Check if all desired columns exist, drop extra ones, reorder
+                existing_cols = [c for c in cols_to_keep if c in df_opt.columns]
+                df_export = df_opt[existing_cols]
+
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Optimized_Results')
+                    
+                    # Format the Excel sheet
+                    workbook = writer.book
+                    worksheet = writer.sheets['Optimized_Results']
+                    
+                    # Formats
+                    header_format = workbook.add_format({
+                        'bold': True,
+                        'border': 1,
+                        'bg_color': '#D3D3D3',
+                        'align': 'center',
+                        'valign': 'vcenter'
+                    })
+                    date_format = workbook.add_format({'num_format': 'yyyy-mm-dd hh:mm', 'border': 1})
+                    num_format = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+                    
+                    # Write headers with format
+                    for col_num, value in enumerate(df_export.columns.values):
+                        worksheet.write(0, col_num, value, header_format)
+                        
+                    # Write column formatting
+                    worksheet.set_column('A:A', 20, date_format)  # timestamp
+                    worksheet.set_column('B:K', 15, num_format)   # Other data
+                    
+                    # --- ADD SUMMARY WORKSHEET ---
+                    ws_summary = workbook.add_worksheet('Summary')
+                    
+                    sum_header_fmt = workbook.add_format({
+                        'bold': True,
+                        'font_color': 'white',
+                        'bg_color': '#00A2E8',  # Vibrant light blue matching image
+                        'border': 1
+                    })
+                    sum_data_fmt = workbook.add_format({
+                        'bg_color': '#FFFFE0',  # Light yellow data cell
+                        'num_format': '#,##0',
+                        'border': 1
+                    })
+                    
+                    ws_summary.set_column('A:A', 25)
+                    ws_summary.set_column('B:B', 20)
+                    ws_summary.write('A1', 'Metric', sum_header_fmt)
+                    ws_summary.write('B1', 'Total Value', sum_header_fmt)
+                    
+                    timestep_hours = 1.0
+                    if len(df_opt) > 1:
+                        td = pd.to_datetime(df_opt['timestamp'].iloc[1]) - pd.to_datetime(df_opt['timestamp'].iloc[0])
+                        timestep_hours = td.total_seconds() / 3600.0
+                    
+                    total_discharge = (df_opt['discharge_mw'] * timestep_hours).sum()
+                    
+                    summary_rows = [
+                        ('Total Energy Revenue ($)', metrics.get('Energy Revenue ($)', 0), sum_data_fmt),
+                        ('Total Reg Revenue ($)', metrics.get('Regulation Revenue ($)', 0), sum_data_fmt),
+                        ('Total Revenue ($)', metrics.get('Total Revenue ($)', 0), sum_data_fmt),
+                        ('Total Discharge (MWh)', total_discharge, sum_data_fmt),
+                        ('Cycles / Year', metrics.get('Cycles / Year (Annualized)', 0), sum_data_fmt)
+                    ]
+                    
+                    for row_idx, (label, val, fmt) in enumerate(summary_rows, start=1):
+                        ws_summary.write(row_idx, 0, label, fmt)
+                        ws_summary.write(row_idx, 1, val, fmt)
                 
                 st.download_button(
-                    label="💾 Download Full Results as CSV",
-                    data=csv_buffer.getvalue(),
-                    file_name="BESS_Optimized_Results.csv",
-                    mime="text/csv",
+                    label="💾 Download Full Results as Excel (.xlsx)",
+                    data=excel_buffer.getvalue(),
+                    file_name="BESS_Optimized_Results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
                 
             except Exception as e:

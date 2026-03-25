@@ -4,3 +4,5 @@ matplotlib
 seaborn
 pulp
 streamlit
+openpyxl
+xlsxwriter
