@@ -3,7 +3,7 @@ numpy
 matplotlib
 seaborn
 pulp
-streamlit
+streamlit>=1.35.0
 openpyxl
 xlsxwriter
-altair<5
+altair>=5.0.0
