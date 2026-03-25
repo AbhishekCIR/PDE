@@ -6,3 +6,4 @@ pulp
 streamlit
 openpyxl
 xlsxwriter
+altair<5
