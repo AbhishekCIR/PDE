@@ -28,30 +28,32 @@ mileage_factor = st.sidebar.slider("Regulation Mileage Factor", min_value=0.01, 
 st.sidebar.markdown("---")
 st.sidebar.info("Modify these parameters to test different scenarios instantly.")
 
+# Initialize session state for data
+if 'data_df' not in st.session_state:
+    st.session_state['data_df'] = None
+if 'data_source' not in st.session_state:
+    st.session_state['data_source'] = None
+
 # Main area: File uploader
 st.write("### 1. Upload Hourly Pricing Data")
 uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
 st.markdown("*Note: Your file must contain columns literally named `timestamp`, `LMP`, and `Reg_Price`.*")
 
-data_df = None
-
-# Logic for handling the CSV or Excel file
+# Logic for handling the CSV or Excel file uploaded manually
 if uploaded_file is not None:
     try:
         if uploaded_file.name.endswith('.csv'):
-            data_df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(uploaded_file)
         else:
-            data_df = pd.read_excel(uploaded_file)
-        # Ensure timestamp is datetime
-        if 'timestamp' in data_df.columns:
-            data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
-        st.success("File uploaded successfully!")
-        
-        with st.expander("Preview Uploaded Data"):
-            st.dataframe(data_df.head(24), use_container_width=True)
+            df = pd.read_excel(uploaded_file)
             
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+        st.session_state['data_df'] = df
+        st.session_state['data_source'] = "Your Uploaded File"
     except Exception as e:
-        st.error(f"Error reading CSV: {e}")
+        st.error(f"Error reading File: {e}")
 else:
     st.info("No file uploaded. You can load our default Texas ERCOT dataset or generate random sample data.")
     
@@ -59,29 +61,31 @@ else:
     with col1:
         if st.button("📂 Load Default Texas Dataset (BESS_Template)"):
             try:
-                # Load the Hourly_Data sheet from the local file
-                data_df = pd.read_excel("BESS_Template.xlsx", sheet_name="Hourly_Data")
-                if 'timestamp' in data_df.columns:
-                    data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
-                st.success("Default template dataset loaded! Notice the prices inside.")
-                with st.expander("Preview Default Data", expanded=True):
-                    st.dataframe(data_df.head(24), use_container_width=True)
+                df = pd.read_excel("BESS_Template.xlsx", sheet_name="Hourly_Data")
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                st.session_state['data_df'] = df
+                st.session_state['data_source'] = "Default Texas Dataset (BESS_Template.xlsx)"
             except Exception as e:
                 st.error(f"Could not load BESS_Template.xlsx. Make sure the file exists in the repository! Error: {e}")
                 
     with col2:
         if st.button("🎲 Generate Random 1-Year Data"):
             dummy_sim = BESS_Simulator()
-            data_df = dummy_sim.generate_sample_data(days=365, freq='1h')
-            st.success("Random synthetic data generated!")
-            with st.expander("Preview Sample Data", expanded=True):
-                st.dataframe(data_df.head(24), use_container_width=True)
+            df = dummy_sim.generate_sample_data(days=365, freq='1h')
+            st.session_state['data_df'] = df
+            st.session_state['data_source'] = "Random Synthetic Data"
+
+if st.session_state['data_df'] is not None:
+    st.success(f"Active Dataset: {st.session_state['data_source']}")
+    with st.expander("Preview Active Data", expanded=True):
+        st.dataframe(st.session_state['data_df'].head(24), use_container_width=True)
 
 # Run Optimization
 st.write("### 2. Run Optimization")
 st.write("Once your data is loaded, you can run the MILP engine. This may take up to a minute depending on your computer's speed.")
 
-if data_df is not None:
+if st.session_state['data_df'] is not None:
     if st.button("🚀 Run Optimization", type="primary"):
         with st.spinner("Preparing Optimization Engine..."):
             try:
@@ -102,7 +106,7 @@ if data_df is not None:
                     progress_bar.progress((current + 1) / total, text=f"Solving Optimization: Day {current + 1} of {total}")
 
                 # 3. Run the optimization over the DataFrame
-                df_opt = simulator.run_optimization_dispatch(data_df, progress_callback=update_progress)
+                df_opt = simulator.run_optimization_dispatch(st.session_state['data_df'], progress_callback=update_progress)
                 
                 # Clear the progress bar after completion
                 progress_bar.empty()
