@@ -53,13 +53,29 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error reading CSV: {e}")
 else:
-    st.info("No file uploaded. You can generate a 1-year sample dataset to test the app.")
-    if st.button("Generate Sample 1-Year Data"):
-        dummy_sim = BESS_Simulator()
-        data_df = dummy_sim.generate_sample_data(days=365, freq='1h')
-        st.success("Sample data generated! You can preview it below.")
-        with st.expander("Preview Sample Data", expanded=True):
-            st.dataframe(data_df.head(24), use_container_width=True)
+    st.info("No file uploaded. You can load our default Texas ERCOT dataset or generate random sample data.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📂 Load Default Texas Dataset (BESS_Template)"):
+            try:
+                # Load the Hourly_Data sheet from the local file
+                data_df = pd.read_excel("BESS_Template.xlsx", sheet_name="Hourly_Data")
+                if 'timestamp' in data_df.columns:
+                    data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
+                st.success("Default template dataset loaded! Notice the prices inside.")
+                with st.expander("Preview Default Data", expanded=True):
+                    st.dataframe(data_df.head(24), use_container_width=True)
+            except Exception as e:
+                st.error(f"Could not load BESS_Template.xlsx. Make sure the file exists in the repository! Error: {e}")
+                
+    with col2:
+        if st.button("🎲 Generate Random 1-Year Data"):
+            dummy_sim = BESS_Simulator()
+            data_df = dummy_sim.generate_sample_data(days=365, freq='1h')
+            st.success("Random synthetic data generated!")
+            with st.expander("Preview Sample Data", expanded=True):
+                st.dataframe(data_df.head(24), use_container_width=True)
 
 # Run Optimization
 st.write("### 2. Run Optimization")
