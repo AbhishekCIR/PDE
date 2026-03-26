@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class BESS_Simulator:
-    def __init__(self, power_mw=100, duration_hr=4, rte=0.9, max_cycles_per_day=1, initial_soc_pct=0.5, degradation_cost_per_mwh=0):
+    def __init__(self, power_mw=100, duration_hr=4, rte=0.9, max_cycles_per_day=1, initial_soc_pct=0.5, degradation_cost_per_mwh=0, mileage_factor=0.1):
         self.power_mw = power_mw
         self.duration_hr = duration_hr
         self.energy_mwh = power_mw * duration_hr
@@ -15,6 +15,7 @@ class BESS_Simulator:
         self.max_cycles = max_cycles_per_day
         self.initial_soc = initial_soc_pct * self.energy_mwh
         self.deg_cost = degradation_cost_per_mwh
+        self.mileage_factor = mileage_factor
 
     def generate_sample_data(self, days=365, freq='1h'):
         """Generates synthetic LMP and Regulation price data for 1 year."""
@@ -98,7 +99,7 @@ class BESS_Simulator:
             prob += pulp.lpSum([
                 (d[t] - c[t]) * LMP[t] * timestep_hours + 
                 r[t] * RegPrice[t] * timestep_hours -
-                (d[t] * timestep_hours * self.deg_cost)
+                (r[t] * timestep_hours * self.deg_cost * self.mileage_factor)
                 for t in range(T_day)
             ])
             
@@ -158,7 +159,11 @@ class BESS_Simulator:
         df_out['soc_mwh'] = soc_mwh_arr
         
         df_out['energy_revenue'] = (df_out['discharge_mw'] - df_out['charge_mw']) * df['LMP'] * timestep_hours
-        df_out['reg_revenue'] = df_out['reg_mw'] * df['Reg_Price'] * timestep_hours
+        
+        # Calculate degradation penalty for regulation
+        reg_deg_cost = df_out['reg_mw'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['reg_revenue'] = (df_out['reg_mw'] * df['Reg_Price'] * timestep_hours) - reg_deg_cost
+        
         df_out['revenue'] = df_out['energy_revenue'] + df_out['reg_revenue']
         
         decisions = []

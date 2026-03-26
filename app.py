@@ -19,7 +19,11 @@ duration_hr = st.sidebar.number_input("Duration (Hours)", min_value=1.0, value=4
 rte = st.sidebar.slider("Round Trip Efficiency", min_value=0.50, max_value=1.00, value=0.90, step=0.01)
 max_cycles_per_day = st.sidebar.number_input("Max Cycles per Day", min_value=0.1, value=1.0, step=0.1)
 initial_soc_pct = st.sidebar.slider("Initial State of Charge (%)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Degradation Settings")
 deg_cost = st.sidebar.number_input("Degradation Cost ($/MWh)", min_value=0.0, value=5.0, step=0.5)
+mileage_factor = st.sidebar.slider("Regulation Mileage Factor", min_value=0.01, max_value=0.50, value=0.10, step=0.01, help="Fraction of 1 MW regulation that translates to degradation throughput.")
 
 st.sidebar.markdown("---")
 st.sidebar.info("Modify these parameters to test different scenarios instantly.")
@@ -72,7 +76,8 @@ if data_df is not None:
                     rte=rte,
                     max_cycles_per_day=max_cycles_per_day,
                     initial_soc_pct=initial_soc_pct,
-                    degradation_cost_per_mwh=deg_cost
+                    degradation_cost_per_mwh=deg_cost,
+                    mileage_factor=mileage_factor
                 )
                 
                 # 2. Add Progress Bar and Callback
