@@ -1,29 +1,16 @@
 import pandas as pd
 import numpy as np
 import pulp
-import matplotlib.pyplot as plt
 from tqdm import tqdm
+from core_optimizer import BESS_Simulator_Base
 
-class BESS_Simulator:
-    def __init__(self, power_mw=100, duration_hr=4, rte=0.9, max_cycles_per_day=1, initial_soc_pct=0.5, degradation_cost_per_mwh=0, mileage_factor=0.1):
-        self.power_mw = power_mw
-        self.duration_hr = duration_hr
-        self.energy_mwh = power_mw * duration_hr
-        self.rte = rte
-        self.eff_c = np.sqrt(rte)
-        self.eff_d = np.sqrt(rte)
-        self.max_cycles = max_cycles_per_day
-        self.initial_soc = initial_soc_pct * self.energy_mwh
-        self.deg_cost = degradation_cost_per_mwh
-        self.mileage_factor = mileage_factor
-
+class Generic_Optimizer(BESS_Simulator_Base):
     def generate_sample_data(self, days=365, freq='1h'):
         """Generates synthetic LMP and Regulation price data for 1 year."""
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
         hours = df['timestamp'].dt.hour
-        # Base LMP: sine wave peaking at 18:00, higher in summer
         months = df['timestamp'].dt.month
         summer_mult = np.where((months >= 6) & (months <= 8), 1.5, 1.0)
         
@@ -32,11 +19,9 @@ class BESS_Simulator:
         df['LMP'] = base_lmp + noise
         df['LMP'] = df['LMP'].clip(lower=0)
         
-        # Price Spikes (fewer in winter, more in summer)
         spike_indices = np.random.choice(df.index, size=int(len(df)*0.03), replace=False)
         df.loc[spike_indices, 'LMP'] += np.random.uniform(50, 200, size=len(spike_indices))
         
-        # Regulation price
         df['Reg_Price'] = np.random.lognormal(mean=2, sigma=0.8, size=len(df))
         
         return df
@@ -44,10 +29,8 @@ class BESS_Simulator:
     def run_optimization_dispatch(self, df, progress_callback=None):
         """
         Runs rigorous MILP co-optimization day-by-day.
-        Solves 365 separate 24h problems handling strict limits of 1 discrete charge cycle and 1 discharge cycle per day.
+        Solves 365 separate 24h problems handling continuous optimization.
         """
-        print(f"Building and Solving MILP Optimization Models over {len(df) // 24} days...")
-        
         T_total = len(df)
         df_out = df.copy()
         
@@ -62,13 +45,13 @@ class BESS_Simulator:
         
         if T_total > 1:
             timestep_hours = (df['timestamp'].iloc[1] - df['timestamp'].iloc[0]).total_seconds() / 3600.0
+            if timestep_hours == 0:
+                timestep_hours = 1.0
         else:
             timestep_hours = 1.0
             
         current_soc = self.initial_soc
         
-        # We loop day by day to apply strict daily constraints and avoid a massive 8760 hour MILP matrix.
-        # This keeps the model incredibly fast while perfectly enforcing "once a day" limits.
         dates = df['timestamp'].dt.date.unique()
         
         for i, date_val in enumerate(tqdm(dates, desc='Solving Daily Optimization')):
@@ -89,11 +72,9 @@ class BESS_Simulator:
             r = pulp.LpVariable.dicts("Reg", range(T_day), lowBound=0, upBound=self.power_mw)
             soc = pulp.LpVariable.dicts("SoC", range(T_day), lowBound=0, upBound=self.energy_mwh)
             
-            # Binary variables for charging and discharging states to enforce 1 block per day
+            # Binary variables for charging and discharging states to prevent simultaneous charge/discharge
             u_c = pulp.LpVariable.dicts("u_C", range(T_day), cat='Binary')
             u_d = pulp.LpVariable.dicts("u_D", range(T_day), cat='Binary')
-            v_start_c = pulp.LpVariable.dicts("v_start_C", range(T_day), cat='Binary')
-            v_start_d = pulp.LpVariable.dicts("v_start_D", range(T_day), cat='Binary')
             
             # Objective
             prob += pulp.lpSum([
@@ -110,14 +91,6 @@ class BESS_Simulator:
                 prob += d[t] <= self.power_mw * u_d[t]
                 prob += u_c[t] + u_d[t] <= 1  # Cannot charge and discharge simultaneously
                 
-                # Start block counting
-                if t == 0:
-                    prob += v_start_c[t] >= u_c[t]
-                    prob += v_start_d[t] >= u_d[t]
-                else:
-                    prob += v_start_c[t] >= u_c[t] - u_c[t-1]
-                    prob += v_start_d[t] >= u_d[t] - u_d[t-1]
-                    
                 # Power and SoC tracking
                 prob += d[t] + r[t] <= self.power_mw
                 prob += c[t] + r[t] <= self.power_mw
@@ -129,22 +102,11 @@ class BESS_Simulator:
                 else:
                     prob += soc[t] == soc[t-1] + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours
             
-            # The crucial constraints for ONLY 1 DISCRETE CYCLE per day:
-            # Maximum 1 start of charge, Maximum 1 start of discharge per day
-            prob += pulp.lpSum([v_start_c[t] for t in range(T_day)]) <= 1
-            prob += pulp.lpSum([v_start_d[t] for t in range(T_day)]) <= 1
-            
-            # Energy Throughput Constraint (to not exceed self.max_cycles of energy)
+            # Energy Throughput Constraint (to not exceed self.max_cycles of energy per day)
             prob += pulp.lpSum([d[t] * timestep_hours for t in range(T_day)]) <= self.max_cycles * self.energy_mwh
             
-            # Solve daily problem silently
             prob.solve(pulp.PULP_CBC_CMD(msg=0))
             
-            # If a day fails, fallback (should not happen with generic prices)
-            if prob.status != 1:
-                print(f"Warning: Non-optimal status {pulp.LpStatus[prob.status]} on {date_val}")
-                
-            # Extract Results and set current_soc for next day
             for i, global_t in enumerate(day_indices):
                 charge_mw_arr[global_t] = c[i].varValue or 0
                 discharge_mw_arr[global_t] = d[i].varValue or 0
@@ -159,8 +121,6 @@ class BESS_Simulator:
         df_out['soc_mwh'] = soc_mwh_arr
         
         df_out['energy_revenue'] = (df_out['discharge_mw'] - df_out['charge_mw']) * df['LMP'] * timestep_hours
-        
-        # Calculate degradation penalty for regulation
         reg_deg_cost = df_out['reg_mw'] * timestep_hours * self.deg_cost * self.mileage_factor
         df_out['reg_revenue'] = (df_out['reg_mw'] * df['Reg_Price'] * timestep_hours) - reg_deg_cost
         
@@ -187,7 +147,6 @@ class BESS_Simulator:
         return df_out
 
     def calculate_summary_metrics(self, df_out):
-        """Calculates key financial and operational metrics."""
         total_revenue = df_out['revenue'].sum()
         total_energy_rev = df_out['energy_revenue'].sum()
         total_reg_rev = df_out['reg_revenue'].sum()
@@ -198,7 +157,9 @@ class BESS_Simulator:
         
         timestep_hours = 1.0
         if len(df_out) > 1:
-            timestep_hours = (df_out['timestamp'].iloc[1] - df_out['timestamp'].iloc[0]).total_seconds() / 3600.0
+            td = (df_out['timestamp'].iloc[1] - df_out['timestamp'].iloc[0]).total_seconds() / 3600.0
+            if td != 0:
+                timestep_hours = td
             
         mwh_discharged = (df_out['discharge_mw'] * timestep_hours).sum()
         cycles_per_year = (mwh_discharged / self.energy_mwh) * (8760 / (total_intervals * timestep_hours))

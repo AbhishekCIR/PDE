@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and Excel output files
+*.csv
+*.xlsx
+!BESS_Template.xlsx  # Allow the template to be committed, but ignore results
+BESS_Optimized_Results.xlsx
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/

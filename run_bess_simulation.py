@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from bess_rtc_model import BESS_Simulator
+from market_generic import Generic_Optimizer
 
 TEMPLATE_FILE = 'BESS_Template.xlsx'
 RESULTS_FILE = 'BESS_Optimized_Results.xlsx'
@@ -18,7 +18,7 @@ def create_template():
     ])
     
     # Generate 1 full year (8760 hours) of sample data
-    dummy_sim = BESS_Simulator()
+    dummy_sim = Generic_Optimizer()
     data_df = dummy_sim.generate_sample_data(days=365, freq='1h') # Generate 1 year
     
     with pd.ExcelWriter(TEMPLATE_FILE) as writer:
@@ -47,7 +47,7 @@ def main():
     
     print(f"Initializing BESS Simulator with Inputs from template...")
     try:
-        simulator = BESS_Simulator(
+        simulator = Generic_Optimizer(
             power_mw=inputs_dict.get('power_mw', 100), 
             duration_hr=inputs_dict.get('duration_hr', 4), 
             rte=inputs_dict.get('rte', 0.9), 
