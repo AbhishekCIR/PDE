@@ -1,0 +1,43 @@
+{
+  "ERCOT": {
+    "market_version": "2026.01",
+    "reserve_durations": {
+      "REGUP": 1.0,
+      "REGDN": 1.0,
+      "RRS": 1.0,
+      "NSPIN": 1.0,
+      "ECRS": 2.0
+    },
+    "default_mileage_factor": 0.10,
+    "elcc_factor": 1.00
+  },
+  "MISO": {
+    "market_version": "2025.12",
+    "reserve_durations": {
+      "REG": 1.0,
+      "SPIN": 1.0,
+      "SUPP": 1.0
+    },
+    "m_to_c_ratio": 7.2,
+    "default_mileage_factor": 0.10,
+    "elcc_factor": 0.50
+  },
+  "PJM": {
+    "market_version": "2025.10",
+    "reserve_durations": {
+      "RegA": 1.0,
+      "RegD": 0.5,
+      "SYNCH": 0.5,
+      "NONSYNCH": 0.5
+    },
+    "default_mileage": {
+      "RegA": 1.2,
+      "RegD": 3.5
+    },
+    "default_performance_score": {
+      "RegA": 0.90,
+      "RegD": 0.95
+    },
+    "elcc_factor": 0.30
+  }
+}
