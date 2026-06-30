@@ -21,77 +21,7 @@ from forecast_engine.persistence_forecast import PersistenceForecastEngine
 # Configure the Streamlit page
 st.set_page_config(page_title="Multi-Market BESS Optimizer", page_icon="🔋", layout="wide")
 
-# Custom CSS for Premium Design Aesthetics
-st.markdown("""
-<style>
-    /* Global styles */
-    .stApp {
-        background-color: #0F172A;
-        color: #F8FAFC;
-        font-family: 'Outfit', 'Inter', sans-serif;
-    }
-    
-    /* Header styling */
-    h1, h2, h3 {
-        color: #38BDF8 !important;
-        font-weight: 700 !important;
-    }
-    
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: #1E293B !important;
-        border-right: 1px solid #334155;
-    }
-    
-    /* Metrics panel */
-    div[data-testid="metric-container"] {
-        background-color: #1E293B;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 15px 20px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-        transition: all 0.3s ease;
-    }
-    div[data-testid="metric-container"]:hover {
-        border-color: #38BDF8;
-        transform: translateY(-2px);
-    }
-    div[data-testid="metric-container"] label {
-        color: #94A3B8 !important;
-        font-size: 0.875rem !important;
-    }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        color: #F8FAFC !important;
-        font-weight: 700 !important;
-    }
-    
-    /* Buttons */
-    div.stButton > button {
-        background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        padding: 10px 24px !important;
-        font-weight: 600 !important;
-        box-shadow: 0 4px 6px -1px rgba(2, 132, 199, 0.4);
-        transition: all 0.2s ease;
-    }
-    div.stButton > button:hover {
-        background: linear-gradient(135deg, #38BDF8 0%, #0284C7 100%) !important;
-        transform: scale(1.02);
-        box-shadow: 0 6px 12px -1px rgba(56, 189, 248, 0.5);
-    }
-    
-    /* Success/Info boxes styling */
-    div.stAlert {
-        background-color: #1E293B !important;
-        border: 1px solid #334155 !important;
-        border-left: 5px solid #38BDF8 !important;
-        border-radius: 8px !important;
-        color: #F8FAFC !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+
 
 st.title("🔋 Battery Energy Storage System (BESS) Multi-Market Optimizer")
 st.markdown("""
