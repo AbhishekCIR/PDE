@@ -1,0 +1,197 @@
+2026-07-02 13:21:05,882 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:21:05,883 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:21:05,883 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:21:05,883 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:23:22,531 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:23:22,533 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:23:22,533 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:23:22,533 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:23:24,543 - bess_platform_bridge - INFO - Initializing BESS Optimization Configuration block in Input sheet...
+2026-07-02 13:23:34,608 - bess_platform_bridge - INFO - Configuration block initialized successfully.
+2026-07-02 13:23:34,662 - bess_platform_bridge - ERROR - Error executing optimization bridge: could not convert string to float: 'On'
+Traceback (most recent call last):
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\main_bridge.py", line 117, in execute_from_excel
+    power_kw = float(sheet_input.range("D405").value or 300000.0) # nameplate capacity in kW
+ValueError: could not convert string to float: 'On'
+2026-07-02 13:25:07,979 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:25:07,979 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:25:07,979 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:25:07,979 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:25:10,233 - bess_platform_bridge - INFO - Initializing BESS Optimization Configuration block in Input sheet...
+2026-07-02 13:25:19,480 - bess_platform_bridge - INFO - Configuration block initialized successfully.
+2026-07-02 13:25:19,570 - bess_platform_bridge - INFO - Loaded Inputs: Market=ERCOT, Solver=Perfect Foresight, Year=2025, Mode=Merchant Only
+2026-07-02 13:25:19,570 - bess_platform_bridge - INFO - BESS Specs: Power=300.0MW, Duration=4.0h, RTE=0.88, Cycles=1.0, DegCost=$5.0
+2026-07-02 13:25:19,570 - bess_platform_bridge - INFO - Loading price telemetry from file: C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\data\telemetry\ercot_2025_hourly.csv
+2026-07-02 13:25:19,661 - bess_platform_bridge - INFO - Telemetry Validation: Info: Found 5 negative energy prices (LMP). Solver will treat this as profit to charge.
+2026-07-02 13:25:52,689 - bess_platform_bridge - INFO - Solve completed successfully. Total operational revenue calculated: $8,925,939.65
+2026-07-02 13:25:56,095 - bess_platform_bridge - ERROR - Error executing optimization bridge: (-2147352567, 'Exception occurred.', (0, 'Microsoft Excel', "The cell or chart you're trying to change is on a protected sheet. To make a change, unprotect the sheet. You might be requested to enter a password.", 'xlmain11.chm', 0, -2146827284), None)
+Traceback (most recent call last):
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\main_bridge.py", line 307, in execute_from_excel
+    sheet_ops.range("A73").value = "BESS Arbitrage Revenue"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\main.py", line 2551, in value
+    conversion.write(data, self, self._options)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\__init__.py", line 110, in write
+    pipeline(ctx)
+    ~~~~~~~~^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\framework.py", line 79, in __call__
+    stage(*args, **kwargs)
+    ~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\standard.py", line 79, in __call__
+    self._write_value(ctx.range, ctx.value, scalar)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\standard.py", line 67, in _write_value
+    rng.raw_value = value
+    ^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\main.py", line 2113, in raw_value
+    self.impl.raw_value = data
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 1209, in raw_value
+    self.xl.Value = data
+    ^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 161, in __setattr__
+    return setattr(self._inner, key, value)
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\win32com\client\__init__.py", line 599, in __setattr__
+    self._oleobj_.Invoke(*(args + (value,) + defArgs))
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pywintypes.com_error: (-2147352567, 'Exception occurred.', (0, 'Microsoft Excel', "The cell or chart you're trying to change is on a protected sheet. To make a change, unprotect the sheet. You might be requested to enter a password.", 'xlmain11.chm', 0, -2146827284), None)
+2026-07-02 13:26:33,538 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:26:33,538 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:26:33,538 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:26:33,538 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:26:35,592 - bess_platform_bridge - INFO - Initializing BESS Optimization Configuration block in Input sheet...
+2026-07-02 13:26:45,384 - bess_platform_bridge - INFO - Configuration block initialized successfully.
+2026-07-02 13:26:45,487 - bess_platform_bridge - INFO - Loaded Inputs: Market=ERCOT, Solver=Perfect Foresight, Year=2025, Mode=Merchant Only
+2026-07-02 13:26:45,487 - bess_platform_bridge - INFO - BESS Specs: Power=300.0MW, Duration=4.0h, RTE=0.88, Cycles=1.0, DegCost=$5.0
+2026-07-02 13:26:45,488 - bess_platform_bridge - INFO - Loading price telemetry from file: C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\data\telemetry\ercot_2025_hourly.csv
+2026-07-02 13:26:45,518 - bess_platform_bridge - INFO - Telemetry Validation: Info: Found 5 negative energy prices (LMP). Solver will treat this as profit to charge.
+2026-07-02 13:27:17,697 - bess_platform_bridge - INFO - Solve completed successfully. Total operational revenue calculated: $8,925,939.65
+2026-07-02 13:27:35,510 - bess_platform_bridge - ERROR - Error executing optimization bridge: datetime64 type does not support sum operations
+Traceback (most recent call last):
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\main_bridge.py", line 354, in execute_from_excel
+    chart_paths = generate_dashboard_charts(df_opt, metrics, market_name, output_dir="logs")
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\dashboard\excel_dashboard.py", line 20, in generate_dashboard_charts
+    monthly_sums = df_opt.groupby('Month_Num').sum()
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\groupby.py", line 3152, in sum
+    result = self._agg_general(
+        numeric_only=numeric_only,
+    ...<2 lines>...
+        npfunc=np.sum,
+    )
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\groupby.py", line 1907, in _agg_general
+    result = self._cython_agg_general(
+        how=alias,
+    ...<3 lines>...
+        **kwargs,
+    )
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\groupby.py", line 2004, in _cython_agg_general
+    new_mgr = data.grouped_reduce(array_func)
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\managers.py", line 1472, in grouped_reduce
+    applied = blk.apply(func)
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\blocks.py", line 395, in apply
+    result = func(self.values, **kwargs)
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\groupby.py", line 1979, in array_func
+    result = self._grouper._cython_operation(
+        "aggregate",
+    ...<4 lines>...
+        **kwargs,
+    )
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\ops.py", line 831, in _cython_operation
+    return cy_op.cython_operation(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        values=values,
+        ^^^^^^^^^^^^^^
+    ...<4 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    )
+    ^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\ops.py", line 541, in cython_operation
+    return values._groupby_op(
+           ~~~~~~~~~~~~~~~~~~^
+        how=self.how,
+        ^^^^^^^^^^^^^
+    ...<4 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    )
+    ^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\arrays\datetimelike.py", line 1694, in _groupby_op
+    raise TypeError(f"datetime64 type does not support {how} operations")
+TypeError: datetime64 type does not support sum operations
+2026-07-02 13:27:50,684 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:27:50,684 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:27:50,684 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:27:50,684 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:27:52,717 - bess_platform_bridge - INFO - Initializing BESS Optimization Configuration block in Input sheet...
+2026-07-02 13:28:03,377 - bess_platform_bridge - INFO - Configuration block initialized successfully.
+2026-07-02 13:28:03,459 - bess_platform_bridge - INFO - Loaded Inputs: Market=ERCOT, Solver=Perfect Foresight, Year=2025, Mode=Merchant Only
+2026-07-02 13:28:03,459 - bess_platform_bridge - INFO - BESS Specs: Power=300.0MW, Duration=4.0h, RTE=0.88, Cycles=1.0, DegCost=$5.0
+2026-07-02 13:28:03,459 - bess_platform_bridge - INFO - Loading price telemetry from file: C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\data\telemetry\ercot_2025_hourly.csv
+2026-07-02 13:28:03,483 - bess_platform_bridge - INFO - Telemetry Validation: Info: Found 5 negative energy prices (LMP). Solver will treat this as profit to charge.
+2026-07-02 13:28:36,351 - bess_platform_bridge - INFO - Solve completed successfully. Total operational revenue calculated: $8,925,939.65
+2026-07-02 13:28:55,242 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,243 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,251 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,254 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,258 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,262 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,266 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:28:55,831 - bess_platform_bridge - ERROR - Error executing optimization bridge: (-2147352567, 'Exception occurred.', (0, None, "The specified file wasn't found.", None, 0, -2146827284), None)
+Traceback (most recent call last):
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\main_bridge.py", line 357, in execute_from_excel
+    inject_charts_to_excel(sheet_dash, chart_paths)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\dashboard\excel_dashboard.py", line 178, in inject_charts_to_excel
+    sheet.pictures.add(
+    ~~~~~~~~~~~~~~~~~~^
+        chart_paths['revenue_stack'],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        height=225
+        ^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\main.py", line 4651, in add
+    impl=self.impl.add(
+        filename,
+    ...<6 lines>...
+        anchor=anchor,
+    )
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 2267, in add
+    xl=self.xl.Parent.Shapes.AddPicture(
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        Filename=filename,
+        ^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        Height=height,
+        ^^^^^^^^^^^^^^
+    ).DrawingObject
+    ^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 122, in __call__
+    v = self.__method(*args, **kwargs)
+  File "C:\Users\abhishek\AppData\Local\Temp\gen_py\3.13\00020813-0000-0000-C000-000000000046x0x1x9.py", line 36437, in AddPicture
+    ret = self._oleobj_.InvokeTypes(1723, LCID, 1, (9, 0), ((8, 1), (3, 1), (3, 1), (4, 1), (4, 1), (4, 1), (4, 1)),Filename
+    	, LinkToFile, SaveWithDocument, Left, Top, Width
+    	, Height)
+pywintypes.com_error: (-2147352567, 'Exception occurred.', (0, None, "The specified file wasn't found.", None, 0, -2146827284), None)
+2026-07-02 13:29:12,525 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:29:12,525 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-02 13:29:12,525 - bess_platform_bridge - INFO - ==================================================
+2026-07-02 13:29:12,525 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-02 13:29:14,447 - bess_platform_bridge - INFO - Initializing BESS Optimization Configuration block in Input sheet...
+2026-07-02 13:29:24,308 - bess_platform_bridge - INFO - Configuration block initialized successfully.
+2026-07-02 13:29:24,382 - bess_platform_bridge - INFO - Loaded Inputs: Market=ERCOT, Solver=Perfect Foresight, Year=2025, Mode=Merchant Only
+2026-07-02 13:29:24,383 - bess_platform_bridge - INFO - BESS Specs: Power=300.0MW, Duration=4.0h, RTE=0.88, Cycles=1.0, DegCost=$5.0
+2026-07-02 13:29:24,383 - bess_platform_bridge - INFO - Loading price telemetry from file: C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\data\telemetry\ercot_2025_hourly.csv
+2026-07-02 13:29:24,407 - bess_platform_bridge - INFO - Telemetry Validation: Info: Found 5 negative energy prices (LMP). Solver will treat this as profit to charge.
+2026-07-02 13:29:57,057 - bess_platform_bridge - INFO - Solve completed successfully. Total operational revenue calculated: $8,925,939.65
+2026-07-02 13:30:13,351 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,352 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,357 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,361 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,364 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,368 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:13,371 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-02 13:30:19,598 - bess_platform_bridge - INFO - Excel financial model update completed successfully!

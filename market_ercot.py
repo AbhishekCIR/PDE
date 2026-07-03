@@ -6,9 +6,24 @@ from core_optimizer import BESS_Simulator_Base
 
 class ERCOT_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
-                 initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10):
+                 initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
+                 reg_throughput_factor=0.15):
         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
-                         degradation_cost_per_mwh, mileage_factor, market_name="ERCOT")
+                         degradation_cost_per_mwh, mileage_factor, market_name="ERCOT",
+                         reg_throughput_factor=reg_throughput_factor)
+
+    def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
+        regup = subclass_vars['regup'][t]
+        regdn = subclass_vars['regdn'][t]
+        
+        regup_val = regup.varValue if is_value else regup
+        regdn_val = regdn.varValue if is_value else regdn
+        
+        if regup_val is None: regup_val = 0.0
+        if regdn_val is None: regdn_val = 0.0
+        
+        # RegDn charges the battery (positive impact), RegUp discharges it (negative impact)
+        return (regdn_val * self.eff_c - regup_val / self.eff_d) * self.reg_throughput_factor * timestep_hours
 
     def generate_sample_data(self, days=365, freq='1h'):
         """Generates synthetic ERCOT prices for 1 year."""

@@ -1,0 +1,7 @@
+{
+  "telemetry_dir": "data/telemetry",
+  "pnode_db_path": "data/miso_pnodes.csv",
+  "log_file_path": "logs/bess_platform.log",
+  "excel_model_path": "260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb",
+  "excel_model_xlsx": "260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsx"
+}

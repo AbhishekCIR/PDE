@@ -7,11 +7,25 @@ from core_optimizer import BESS_Simulator_Base
 class PJM_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 capacity_price_mw_day=120.0):
+                 capacity_price_mw_day=120.0, reg_throughput_factor=0.15):
         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
-                         degradation_cost_per_mwh, mileage_factor, market_name="PJM")
+                         degradation_cost_per_mwh, mileage_factor, market_name="PJM",
+                         reg_throughput_factor=reg_throughput_factor)
         
         self.capacity_price_mw_day = capacity_price_mw_day
+
+    def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
+        regA = subclass_vars['regA'][t]
+        regD = subclass_vars['regD'][t]
+        
+        regA_val = regA.varValue if is_value else regA
+        regD_val = regD.varValue if is_value else regD
+        
+        if regA_val is None: regA_val = 0.0
+        if regD_val is None: regD_val = 0.0
+        
+        # PJM dual regulation (RegA + RegD) RTE loss depletion
+        return (regA_val + regD_val) * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
     def generate_sample_data(self, days=365, freq='1h'):
         """Generates synthetic PJM prices for 1 year."""

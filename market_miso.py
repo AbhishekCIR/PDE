@@ -7,12 +7,21 @@ from core_optimizer import BESS_Simulator_Base
 class MISO_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 capacity_price_mw_day=50.0):
-        super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
-                         degradation_cost_per_mwh, mileage_factor, market_name="MISO")
-        
-        self.m_to_c_ratio = self.config.get("m_to_c_ratio", 7.2)
-        self.capacity_price_mw_day = capacity_price_mw_day
+                 capacity_price_mw_day=50.0, reg_throughput_factor=0.15):
+         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
+                          degradation_cost_per_mwh, mileage_factor, market_name="MISO",
+                          reg_throughput_factor=reg_throughput_factor)
+         
+         self.m_to_c_ratio = self.config.get("m_to_c_ratio", 7.2)
+         self.capacity_price_mw_day = capacity_price_mw_day
+
+    def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
+        reg = subclass_vars['reg'][t]
+        reg_val = reg.varValue if is_value else reg
+        if reg_val is None:
+            reg_val = 0.0
+        # MISO bidirectional regulation RTE loss depletion
+        return reg_val * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
     def generate_sample_data(self, days=365, freq='1h'):
         """Generates synthetic MISO prices for 1 year."""

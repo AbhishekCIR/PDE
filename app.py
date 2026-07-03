@@ -62,6 +62,7 @@ max_cycles_per_day = st.sidebar.number_input("Max Cycles per Day", min_value=0.1
 initial_soc_pct = st.sidebar.slider("Initial SoC (%)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
 deg_cost = st.sidebar.number_input("Degradation Cost ($/MWh Discharged)", min_value=0.0, value=5.0, step=0.5)
 mileage_factor = st.sidebar.slider("Regulation Mileage Wear Factor", min_value=0.01, max_value=0.50, value=0.10, step=0.01, help="Fraction of regulation capacity translating to cycle wear.")
+reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", min_value=0.00, max_value=0.50, value=0.15, step=0.01, help="Approximate expected energy throughput (MWh) per cleared MW of regulation capacity per hour. Calibrated from industry literature/OEM guidance.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 Operating Mode")
@@ -183,27 +184,31 @@ if st.session_state['data_df'] is not None:
                     optimizer = ERCOT_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
-                        degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor
+                        degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
+                        reg_throughput_factor=reg_throughput_factor
                     )
                 elif selected_market == "MISO":
                     optimizer = MISO_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
-                        capacity_price_mw_day=capacity_price_mw_day
+                        capacity_price_mw_day=capacity_price_mw_day,
+                        reg_throughput_factor=reg_throughput_factor
                     )
                 elif selected_market == "PJM":
                     optimizer = PJM_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
-                        capacity_price_mw_day=capacity_price_mw_day
+                        capacity_price_mw_day=capacity_price_mw_day,
+                        reg_throughput_factor=reg_throughput_factor
                     )
                 else:
                     optimizer = Generic_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
-                        degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor
+                        degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
+                        reg_throughput_factor=reg_throughput_factor
                     )
 
                 # Set capacity credit derating factors in config dynamically

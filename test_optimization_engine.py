@@ -51,7 +51,9 @@ class TestBESSOptimizer(unittest.TestCase):
             self.assertFalse(charge > 1e-3 and discharge > 1e-3, f"Simultaneous charge/discharge detected at index {t}")
             
             # 3. Check state of charge dynamics
-            expected_soc = current_soc + charge * self.eff_c * timestep_hours - (discharge / self.eff_d) * timestep_hours
+            reg = df_opt['reg_mw'].iloc[t] if 'reg_mw' in df_opt.columns else 0.0
+            soc_impact = reg * self.optimizer.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
+            expected_soc = current_soc + charge * self.eff_c * timestep_hours - (discharge / self.eff_d) * timestep_hours + soc_impact
             self.assertAlmostEqual(soc, expected_soc, places=3, msg=f"SoC mismatch at index {t}")
             
             current_soc = soc
@@ -181,6 +183,50 @@ class TestBESSOptimizer(unittest.TestCase):
         self.assertTrue('charge_mw' in df_opt.columns)
         self.assertTrue('discharge_mw' in df_opt.columns)
         self.assertTrue('soc_mwh' in df_opt.columns)
+
+    def test_miso_regulation_throughput_and_charging(self):
+        """Verifies that with a positive regulation throughput factor, the battery is forced to charge
+        from the grid to replenish RTE losses during MISO regulation participation.
+        """
+        miso_opt_0 = MISO_Optimizer(
+            power_mw=150.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.25,
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10,
+            capacity_price_mw_day=0.0, reg_throughput_factor=0.0
+        )
+        miso_opt_15 = MISO_Optimizer(
+            power_mw=150.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.25,
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10,
+            capacity_price_mw_day=0.0, reg_throughput_factor=0.15
+        )
+        
+        # Create 48 hours dataset with high regulation prices and positive LMPs
+        # Batteries will want to clear regulation.
+        timestamps = pd.date_range(start="2026-01-01", periods=48, freq='h')
+        df = pd.DataFrame({
+            'timestamp': timestamps,
+            'LMP': [40.0] * 48,
+            'REG_CAP': [30.0] * 48,
+            'REG_MIL': [2.0] * 48,
+            'SPIN': [0.0] * 48,
+            'SUPP': [0.0] * 48
+        })
+        
+        # 1. Solve with throughput factor = 0.0 (baseline) -> Should stay idle with 0 charging
+        df_opt_0 = miso_opt_0.run_optimization_dispatch(df)
+        self.assertEqual(df_opt_0['charge_mw'].sum(), 0.0, "Battery charged in MISO with 0.0 throughput factor")
+        self.assertAlmostEqual(df_opt_0['soc_mwh'].iloc[-1], miso_opt_0.initial_soc, places=3, msg="SoC drifted even with 0.0 throughput")
+        
+        # 2. Solve with throughput factor = 0.15 -> Should have charging cycles to replenish RTE losses
+        df_opt_15 = miso_opt_15.run_optimization_dispatch(df)
+        self.assertTrue(df_opt_15['charge_mw'].sum() > 0.0, "Battery failed to charge to replenish regulation RTE losses")
+        
+        # Verify that the physical SOC constraint (soc_mwh >= REG_MW * dur_reg) is met in every hour
+        for t in range(len(df_opt_15)):
+            soc = df_opt_15['soc_mwh'].iloc[t]
+            reg = df_opt_15['REG_MW'].iloc[t]
+            self.assertTrue(soc >= reg - 1e-3, f"SOC {soc} went below REG_MW {reg} at index {t}")
 
 if __name__ == '__main__':
     unittest.main()

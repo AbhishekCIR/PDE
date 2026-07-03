@@ -33,6 +33,11 @@ This document tracks engineering assumptions, modeling approximations, and finan
    - **Assumption:** Regulation mileage factors (MISO $m\_to\_c = 7.2$, PJM RegD = 3.5, RegA = 1.2) are treated as constants representing typical rolling 30-day averages.
    - **Deviation from Reality:** Actual mileage ratios are calculated ex-post based on the real-world regulation signals issued by the ISO.
 
+3. **Frequency Regulation Throughput and SOC Impact (Bankability Assumption):**
+   - **Assumption:** To provide a conservative representation of project cash flows, the model does not assume that frequency regulation is energy-neutral in practice. Instead, a representative regulation throughput factor of 15% is applied to approximate the energy movement associated with AGC dispatch. 
+   - **Rationale:** This throughput affects the battery state of charge, resulting in charging energy requirements, round-trip efficiency losses, degradation costs, and long-term augmentation requirements. While the factor is a simplified representation of actual regulation deployment, it provides a conservative approximation of operating costs and helps avoid overstating project revenues, cash flows, and debt service coverage metrics.
+
+
 ---
 
 ## 3. Financial Model Boundaries

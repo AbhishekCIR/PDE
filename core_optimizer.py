@@ -9,7 +9,7 @@ import os
 class BESS_Simulator_Base:
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 market_name="Generic"):
+                 market_name="Generic", reg_throughput_factor=0.15):
         self.power_mw = power_mw
         self.duration_hr = duration_hr
         self.energy_mwh = power_mw * duration_hr
@@ -21,6 +21,7 @@ class BESS_Simulator_Base:
         self.deg_cost = degradation_cost_per_mwh
         self.mileage_factor = mileage_factor
         self.market_name = market_name
+        self.reg_throughput_factor = reg_throughput_factor
         
         # Load external market config
         self.config = self.load_market_config()
@@ -52,6 +53,12 @@ class BESS_Simulator_Base:
     def add_market_constraints(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Adds market-specific power capacity & SOC reservation constraints."""
         pass
+
+    def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
+        """Returns the physical energy impact (MWh) on State of Charge from market awards.
+        Negative values represent SOC depletion (e.g. RTE losses).
+        """
+        return 0.0
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective sum terms for market products (excluding energy & deg cost)."""
@@ -187,9 +194,9 @@ class BESS_Simulator_Base:
                     prob += soc[w] <= self.energy_mwh + s_max[w]
                     
                     if w == 0:
-                        prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours
+                        prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
                     else:
-                        prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours
+                        prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
                 
                 # Daily cycle constraint mapped across the look-ahead window (scaled proportionally)
                 prob += pulp.lpSum([d[w] * timestep_hours for w in range(T_window)]) <= (self.max_cycles * self.energy_mwh * (T_window * timestep_hours / 24.0))
@@ -210,7 +217,7 @@ class BESS_Simulator_Base:
                 discharge_mw_arr[t] = np.clip(discharge_mw_arr[t], 0.0, self.power_mw)
                 
                 # State of charge dynamics updates based on actual executed step
-                next_soc = current_soc + charge_mw_arr[t] * self.eff_c * timestep_hours - (discharge_mw_arr[t] / self.eff_d) * timestep_hours
+                next_soc = current_soc + charge_mw_arr[t] * self.eff_c * timestep_hours - (discharge_mw_arr[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, 0, timestep_hours, is_value=True)
                 next_soc = np.clip(next_soc, 0.0, self.energy_mwh)
                 soc_mwh_arr[t] = next_soc
                 
@@ -280,9 +287,9 @@ class BESS_Simulator_Base:
                     prob += soc[t] <= self.energy_mwh + s_max[t]
                     
                     if t == 0:
-                        prob += soc[t] == current_soc + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours
+                        prob += soc[t] == current_soc + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
                     else:
-                        prob += soc[t] == soc[t-1] + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours
+                        prob += soc[t] == soc[t-1] + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
                 
                 prob += pulp.lpSum([d[t] * timestep_hours for t in range(T_day)]) <= self.max_cycles * self.energy_mwh
                 
@@ -300,9 +307,9 @@ class BESS_Simulator_Base:
                     discharge_mw_arr[global_t] = np.clip(discharge_mw_arr[global_t], 0.0, self.power_mw)
                     
                     if t_idx == 0:
-                        soc_mwh_arr[global_t] = current_soc + charge_mw_arr[global_t] * self.eff_c * timestep_hours - (discharge_mw_arr[global_t] / self.eff_d) * timestep_hours
+                        soc_mwh_arr[global_t] = current_soc + charge_mw_arr[global_t] * self.eff_c * timestep_hours - (discharge_mw_arr[global_t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t_idx, timestep_hours, is_value=True)
                     else:
-                        soc_mwh_arr[global_t] = soc_mwh_arr[global_t-1] + charge_mw_arr[global_t] * self.eff_c * timestep_hours - (discharge_mw_arr[global_t] / self.eff_d) * timestep_hours
+                        soc_mwh_arr[global_t] = soc_mwh_arr[global_t-1] + charge_mw_arr[global_t] * self.eff_c * timestep_hours - (discharge_mw_arr[global_t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t_idx, timestep_hours, is_value=True)
                     
                     soc_mwh_arr[global_t] = np.clip(soc_mwh_arr[global_t], 0.0, self.energy_mwh)
                 

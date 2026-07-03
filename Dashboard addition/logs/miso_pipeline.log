@@ -1,0 +1,154 @@
+2026-07-01 11:44:40 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:44:40 - miso_pipeline - INFO - Starting MISO Ancillary Service and LMP Compilation Pipeline
+2026-07-01 11:44:40 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:44:40 - miso_pipeline - INFO - Identifying closest MISO Pnode for coordinates: 39.534248, -87.976314
+2026-07-01 11:44:40 - miso_pipeline.pnode_locator - INFO - Initialized default pricing node database at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\miso_pnodes.csv
+2026-07-01 11:44:40 - miso_pipeline.pnode_locator - INFO - Nearest pricing node identified: AMIL.PARIS_BESS (20006) at a distance of 0.0 miles.
+2026-07-01 11:44:40 - miso_pipeline - INFO - Locator selected: AMIL.PARIS_BESS (ID: 20006, Zone: Zone 3) - Distance: 0.0 miles
+2026-07-01 11:44:40 - miso_pipeline - INFO - Triggering downloads for range: 2024-03-09 to 2024-03-12
+2026-07-01 11:44:40 - miso_pipeline.downloader - INFO - Preparing to download 16 files concurrently with 10 threads.
+2026-07-01 11:44:41 - miso_pipeline.downloader - INFO - Downloaded: 20240310 rtmcp
+2026-07-01 11:44:43 - miso_pipeline.downloader - INFO - Downloaded: 20240311 rtmcp
+2026-07-01 11:44:43 - miso_pipeline.downloader - INFO - Downloaded: 20240309 rtmcp
+2026-07-01 11:44:44 - miso_pipeline.downloader - INFO - Downloaded: 20240309 rtlmp
+2026-07-01 11:44:44 - miso_pipeline.downloader - INFO - Downloaded: 20240310 damcp
+2026-07-01 11:44:44 - miso_pipeline.downloader - INFO - Downloaded: 20240309 dalmp
+2026-07-01 11:44:44 - miso_pipeline.downloader - INFO - Downloaded: 20240310 dalmp
+2026-07-01 11:44:44 - miso_pipeline.downloader - INFO - Downloaded: 20240309 damcp
+2026-07-01 11:44:45 - miso_pipeline.downloader - INFO - Downloaded: 20240311 damcp
+2026-07-01 11:44:45 - miso_pipeline.downloader - INFO - Downloaded: 20240310 rtlmp
+2026-07-01 11:44:45 - miso_pipeline.downloader - INFO - Downloaded: 20240312 rtmcp
+2026-07-01 11:44:45 - miso_pipeline.downloader - INFO - Downloaded: 20240311 dalmp
+2026-07-01 11:44:45 - miso_pipeline.downloader - INFO - Downloaded: 20240311 rtlmp
+2026-07-01 11:44:47 - miso_pipeline.downloader - INFO - Downloaded: 20240312 dalmp
+2026-07-01 11:44:47 - miso_pipeline.downloader - INFO - Downloaded: 20240312 damcp
+2026-07-01 11:44:48 - miso_pipeline.downloader - INFO - Downloaded: 20240312 rtlmp
+2026-07-01 11:44:48 - miso_pipeline.downloader - INFO - Download log spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\download_log.xlsx
+2026-07-01 11:44:48 - miso_pipeline - INFO - Compiling Real-Time MCP dataset...
+2026-07-01 11:44:48 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240309_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:48 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240310_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:48 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240311_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:48 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240312_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:48 - miso_pipeline.transformer - WARNING - Timeseries gap detected: 96 hours are missing in the raw reports. Filled with NaN.
+2026-07-01 11:44:48 - miso_pipeline - INFO - Compiling Day-Ahead MCP dataset...
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240309_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240309_damcp.csv. Generating placeholder.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240310_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240310_damcp.csv. Generating placeholder.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240311_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240311_damcp.csv. Generating placeholder.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS_BESS' not found in 20240312_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:44:49 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240312_damcp.csv. Generating placeholder.
+2026-07-01 11:44:49 - miso_pipeline - INFO - Merging Real-Time LMPs...
+2026-07-01 11:45:26 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:45:26 - miso_pipeline - INFO - Starting MISO Ancillary Service and LMP Compilation Pipeline
+2026-07-01 11:45:26 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:45:26 - miso_pipeline - INFO - Identifying closest MISO Pnode for coordinates: 39.534248, -87.976314
+2026-07-01 11:45:26 - miso_pipeline.pnode_locator - INFO - Initialized default pricing node database at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\miso_pnodes.csv
+2026-07-01 11:45:26 - miso_pipeline.pnode_locator - INFO - Nearest pricing node identified: AMIL.PARIS (20001) at a distance of 15.8725 miles.
+2026-07-01 11:45:26 - miso_pipeline - INFO - Locator selected: AMIL.PARIS (ID: 20001, Zone: Zone 3) - Distance: 15.8725 miles
+2026-07-01 11:45:26 - miso_pipeline - INFO - Triggering downloads for range: 2024-03-09 to 2024-03-12
+2026-07-01 11:45:26 - miso_pipeline.downloader - INFO - Preparing to download 16 files concurrently with 10 threads.
+2026-07-01 11:45:26 - miso_pipeline.downloader - INFO - Download log spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\download_log.xlsx
+2026-07-01 11:45:26 - miso_pipeline - INFO - Compiling Real-Time MCP dataset...
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240309_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240310_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240311_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240312_rtmcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.transformer - WARNING - Timeseries gap detected: 96 hours are missing in the raw reports. Filled with NaN.
+2026-07-01 11:45:26 - miso_pipeline - INFO - Compiling Day-Ahead MCP dataset...
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240309_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240309_damcp.csv. Generating placeholder.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240310_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240310_damcp.csv. Generating placeholder.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240311_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240311_damcp.csv. Generating placeholder.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - Target Pnode 'AMIL.PARIS' not found in 20240312_damcp.csv. Generating empty row placeholders.
+2026-07-01 11:45:26 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240312_damcp.csv. Generating placeholder.
+2026-07-01 11:45:26 - miso_pipeline - INFO - Merging Real-Time LMPs...
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - INFO - Processing and merging LMP data for node 'AMIL.PARIS'...
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - ERROR - Error parsing daily LMP file C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\raw\20240309_rtlmp.csv: 'Value_Type'
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - ERROR - Error parsing daily LMP file C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\raw\20240310_rtlmp.csv: 'Value_Type'
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - ERROR - Error parsing daily LMP file C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\raw\20240311_rtlmp.csv: 'Value_Type'
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - ERROR - Error parsing daily LMP file C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\raw\20240312_rtlmp.csv: 'Value_Type'
+2026-07-01 11:45:26 - miso_pipeline.merge_lmp - INFO - Successfully merged LMP with Ancillary Prices.
+2026-07-01 11:45:26 - miso_pipeline - INFO - Running validation checks...
+2026-07-01 11:45:26 - miso_pipeline.validator - INFO - Date range check: expected 2024-03-09 to 2024-03-12. Found 2024-03-09 to 2024-03-12. Status: OK
+2026-07-01 11:45:26 - miso_pipeline.validator - WARNING - Validation: Column 'REG_CAP' has 96 missing values.
+2026-07-01 11:45:26 - miso_pipeline.validator - WARNING - Validation: Column 'SPIN' has 96 missing values.
+2026-07-01 11:45:26 - miso_pipeline.validator - WARNING - Validation: Column 'SUPP' has 96 missing values.
+2026-07-01 11:45:26 - miso_pipeline.validator - WARNING - Validation: Column 'LMP' has 96 missing values.
+2026-07-01 11:46:32 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:46:32 - miso_pipeline - INFO - Starting MISO Ancillary Service and LMP Compilation Pipeline
+2026-07-01 11:46:32 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:46:32 - miso_pipeline - INFO - Identifying closest MISO Pnode for coordinates: 42.0308, -93.6319
+2026-07-01 11:46:32 - miso_pipeline.pnode_locator - INFO - Initialized default pricing node database at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\data\miso_pnodes.csv
+2026-07-01 11:46:32 - miso_pipeline.pnode_locator - INFO - Nearest pricing node identified: ALTW.AMESWIND (10001) at a distance of 0.0 miles.
+2026-07-01 11:46:32 - miso_pipeline - INFO - Locator selected: ALTW.AMESWIND (ID: 10001, Zone: Zone 1) - Distance: 0.0 miles
+2026-07-01 11:46:32 - miso_pipeline - INFO - Triggering downloads for range: 2024-03-09 to 2024-03-12
+2026-07-01 11:46:32 - miso_pipeline.downloader - INFO - Preparing to download 16 files concurrently with 10 threads.
+2026-07-01 11:46:32 - miso_pipeline.downloader - INFO - Download log spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\download_log.xlsx
+2026-07-01 11:46:32 - miso_pipeline - INFO - Compiling Real-Time MCP dataset...
+2026-07-01 11:46:32 - miso_pipeline - INFO - Compiling Day-Ahead MCP dataset...
+2026-07-01 11:46:32 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240309_damcp.csv. Generating placeholder.
+2026-07-01 11:46:32 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240310_damcp.csv. Generating placeholder.
+2026-07-01 11:46:32 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240311_damcp.csv. Generating placeholder.
+2026-07-01 11:46:32 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240312_damcp.csv. Generating placeholder.
+2026-07-01 11:46:32 - miso_pipeline - INFO - Merging Real-Time LMPs...
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - INFO - Processing and merging LMP data for node 'ALTW.AMESWIND'...
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - WARNING - No LMP values found for node 'ALTW.AMESWIND' in file 20240309_rtlmp.csv.
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - WARNING - No LMP values found for node 'ALTW.AMESWIND' in file 20240310_rtlmp.csv.
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - WARNING - No LMP values found for node 'ALTW.AMESWIND' in file 20240311_rtlmp.csv.
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - WARNING - No LMP values found for node 'ALTW.AMESWIND' in file 20240312_rtlmp.csv.
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - INFO - Successfully merged LMP with Ancillary Prices.
+2026-07-01 11:46:32 - miso_pipeline - INFO - Merging Day-Ahead LMPs...
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - INFO - Processing and merging LMP data for node 'ALTW.AMESWIND'...
+2026-07-01 11:46:32 - miso_pipeline.merge_lmp - INFO - Successfully merged LMP with Ancillary Prices.
+2026-07-01 11:46:32 - miso_pipeline - INFO - Running validation checks...
+2026-07-01 11:46:32 - miso_pipeline.validator - INFO - Date range check: expected 2024-03-09 to 2024-03-12. Found 2024-03-09 to 2024-03-12. Status: OK
+2026-07-01 11:46:32 - miso_pipeline.validator - WARNING - Validation: Column 'LMP' has 96 missing values.
+2026-07-01 11:46:32 - miso_pipeline.validator - INFO - DST Adjustment detected on 2024-03-10: 23 hours instead of 24.
+2026-07-01 11:46:32 - miso_pipeline.validator - INFO - DST Adjustment detected on 2024-03-13: 1 hours instead of 24.
+2026-07-01 11:46:33 - miso_pipeline.validator - INFO - Validation report spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\validation_report.xlsx
+2026-07-01 11:46:33 - miso_pipeline - INFO - Saving compiled optimizer datasets...
+2026-07-01 11:46:33 - miso_pipeline - INFO - Saved Real-Time optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input_rt.csv
+2026-07-01 11:46:33 - miso_pipeline - INFO - Saved Day-Ahead optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input_da.csv
+2026-07-01 11:46:33 - miso_pipeline - INFO - Saved default optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input.csv
+2026-07-01 11:46:33 - miso_pipeline - INFO - Saved premium optimizer workbook to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input.xlsx
+2026-07-01 11:46:33 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:46:33 - miso_pipeline - INFO - MISO MCP/LMP Pipeline execution completed successfully!
+2026-07-01 11:46:33 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:48:28 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:48:28 - miso_pipeline - INFO - Starting MISO Ancillary Service and LMP Compilation Pipeline
+2026-07-01 11:48:28 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:48:28 - miso_pipeline - INFO - Identifying closest MISO Pnode for coordinates: 42.0308, -93.6319
+2026-07-01 11:48:28 - miso_pipeline.pnode_locator - INFO - Nearest pricing node identified: ALTW.AMESWIND (10001) at a distance of 0.0 miles.
+2026-07-01 11:48:28 - miso_pipeline - INFO - Locator selected: ALTW.AMESWIND (ID: 10001, Zone: Zone 1) - Distance: 0.0 miles
+2026-07-01 11:48:28 - miso_pipeline - INFO - Triggering downloads for range: 2024-03-09 to 2024-03-12
+2026-07-01 11:48:28 - miso_pipeline.downloader - INFO - Preparing to download 16 files concurrently with 10 threads.
+2026-07-01 11:48:28 - miso_pipeline.downloader - INFO - Download log spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\download_log.xlsx
+2026-07-01 11:48:28 - miso_pipeline - INFO - Compiling Real-Time MCP dataset...
+2026-07-01 11:48:28 - miso_pipeline - INFO - Compiling Day-Ahead MCP dataset...
+2026-07-01 11:48:28 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240309_damcp.csv. Generating placeholder.
+2026-07-01 11:48:28 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240310_damcp.csv. Generating placeholder.
+2026-07-01 11:48:28 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240311_damcp.csv. Generating placeholder.
+2026-07-01 11:48:28 - miso_pipeline.parser - WARNING - REGMILEAGEMCP not found in Miso-Wide rows in 20240312_damcp.csv. Generating placeholder.
+2026-07-01 11:48:28 - miso_pipeline - INFO - Merging Real-Time LMPs...
+2026-07-01 11:48:28 - miso_pipeline.merge_lmp - INFO - Processing and merging LMP data for node 'ALTW.AMESWIND'...
+2026-07-01 11:48:29 - miso_pipeline.merge_lmp - INFO - Successfully merged LMP with Ancillary Prices.
+2026-07-01 11:48:29 - miso_pipeline - INFO - Merging Day-Ahead LMPs...
+2026-07-01 11:48:29 - miso_pipeline.merge_lmp - INFO - Processing and merging LMP data for node 'ALTW.AMESWIND'...
+2026-07-01 11:48:29 - miso_pipeline.merge_lmp - INFO - Successfully merged LMP with Ancillary Prices.
+2026-07-01 11:48:29 - miso_pipeline - INFO - Running validation checks...
+2026-07-01 11:48:29 - miso_pipeline.validator - INFO - Date range check: expected 2024-03-09 to 2024-03-12. Found 2024-03-09 to 2024-03-12. Status: OK
+2026-07-01 11:48:29 - miso_pipeline.validator - INFO - DST Adjustment detected on 2024-03-10: 23 hours instead of 24.
+2026-07-01 11:48:29 - miso_pipeline.validator - INFO - DST Adjustment detected on 2024-03-13: 1 hours instead of 24.
+2026-07-01 11:48:29 - miso_pipeline.validator - INFO - Validation report spreadsheet generated successfully at: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\validation_report.xlsx
+2026-07-01 11:48:29 - miso_pipeline - INFO - Saving compiled optimizer datasets...
+2026-07-01 11:48:29 - miso_pipeline - INFO - Saved Real-Time optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input_rt.csv
+2026-07-01 11:48:29 - miso_pipeline - INFO - Saved Day-Ahead optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input_da.csv
+2026-07-01 11:48:29 - miso_pipeline - INFO - Saved default optimizer CSV to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input.csv
+2026-07-01 11:48:29 - miso_pipeline - INFO - Saved premium optimizer workbook to: C:\Users\abhishek\Desktop\Financial models\FM deliverable\CROW HOLDINGS\output\optimizer_input.xlsx
+2026-07-01 11:48:29 - miso_pipeline - INFO - =============================================================
+2026-07-01 11:48:29 - miso_pipeline - INFO - MISO MCP/LMP Pipeline execution completed successfully!
+2026-07-01 11:48:29 - miso_pipeline - INFO - =============================================================
