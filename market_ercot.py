@@ -22,11 +22,13 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
         if regup_val is None: regup_val = 0.0
         if regdn_val is None: regdn_val = 0.0
         
-        # RegDn charges the battery (positive impact), RegUp discharges it (negative impact)
-        return (regdn_val * self.eff_c - regup_val / self.eff_d) * self.reg_throughput_factor * timestep_hours
+        # RegDn charges the battery (positive impact), RegUp discharges it (negative impact) - scaled by 0.5 factor
+        return (regdn_val * self.eff_c - regup_val / self.eff_d) * self.reg_throughput_factor * 0.5 * timestep_hours
 
-    def generate_sample_data(self, days=365, freq='1h'):
+    def generate_sample_data(self, days=365, freq='1h', random_seed=None):
         """Generates synthetic ERCOT prices for 1 year."""
+        if random_seed is not None:
+            np.random.seed(random_seed)
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
@@ -173,9 +175,20 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
         total_discharge_mwh = (df_out['discharge_mw'] * timestep_hours).sum()
         total_charge_mwh = (df_out['charge_mw'] * timestep_hours).sum()
         
-        efc = total_discharge_mwh / self.energy_mwh
+        agc_throughput_up = df_out['REGUP_MW'] * self.reg_throughput_factor * 0.5
+        agc_throughput_dn = df_out['REGDN_MW'] * self.reg_throughput_factor * 0.5
         
-        achieved_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        total_agc_discharge_mwh = (agc_throughput_up * timestep_hours).sum()
+        total_agc_charge_mwh = (agc_throughput_dn * timestep_hours).sum()
+        
+        arb_efc = total_discharge_mwh / self.energy_mwh
+        # AGC EFC: we can represent it using discharging throughput
+        agc_efc = total_agc_discharge_mwh / self.energy_mwh
+        total_efc = arb_efc + agc_efc
+        
+        arb_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        physical_rte = ((total_discharge_mwh + total_agc_discharge_mwh) / 
+                        (total_charge_mwh + total_agc_charge_mwh)) if (total_charge_mwh + total_agc_charge_mwh) > 0 else 0.0
         
         # AS participation fraction (intervals with AS cleared / total intervals)
         as_sum = (df_out['REGUP_MW'] + df_out['REGDN_MW'] + df_out['RRS_MW'] + df_out['NSPIN_MW'] + df_out['ECRS_MW'])
@@ -198,10 +211,18 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
             'Static Capacity Revenue ($)': 0.0,
             'Degradation Expense ($)': deg_expense,
             'Reported Lost Opportunity Cost ($)': loc_sum,
-            'Equivalent Full Cycles (EFC)': efc,
-            'Achieved Round-Trip Efficiency': achieved_rte,
+            'Equivalent Full Cycles (EFC)': arb_efc, # Backward compatibility
+            'Arbitrage EFC': arb_efc,
+            'AGC EFC': agc_efc,
+            'Total EFC': total_efc,
+            'Achieved Round-Trip Efficiency': arb_rte, # Backward compatibility
+            'Arbitrage Round-Trip Efficiency': arb_rte,
+            'Physical Round-Trip Efficiency': physical_rte,
             'Charging Energy (MWh)': total_charge_mwh,
             'Discharging Energy (MWh)': total_discharge_mwh,
+            'AGC Charge Throughput (MWh)': total_agc_charge_mwh,
+            'AGC Discharge Throughput (MWh)': total_agc_discharge_mwh,
+            'Total AGC Throughput (MWh)': total_agc_charge_mwh + total_agc_discharge_mwh,
             'Ancillary Participation Fraction': as_fraction
         }
         

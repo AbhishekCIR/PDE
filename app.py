@@ -95,6 +95,13 @@ if selected_sim_mode == "Rolling Horizon (Forecast-Driven)":
     if forecast_method == "noisy_actual":
         forecast_mape = st.sidebar.slider("Forecast Error (MAPE %)", min_value=0, max_value=50, value=15, step=5) / 100.0
 
+st.sidebar.markdown("---")
+st.sidebar.header("🎲 Synthetic Data Config")
+enable_seed = st.sidebar.checkbox("Use Deterministic Random Seed", value=True)
+random_seed_val = None
+if enable_seed:
+    random_seed_val = st.sidebar.number_input("Random Seed Value", min_value=0, value=42, step=1)
+
 # Initialize Session State Data
 if 'data_df' not in st.session_state:
     st.session_state['data_df'] = None
@@ -159,7 +166,7 @@ else:
         else:
             opt = Generic_Optimizer()
             
-        df_synthetic = opt.generate_sample_data(days=365)
+        df_synthetic = opt.generate_sample_data(days=365, random_seed=random_seed_val)
         st.session_state['data_df'] = df_synthetic
         st.session_state['data_source'] = f"Synthetic {selected_market} Data"
         st.session_state['active_market'] = selected_market
@@ -269,20 +276,87 @@ if st.session_state['data_df'] is not None:
                 
                 st.subheader("📊 Operational & Financial Dashboard")
                 
-                # Metric Cards
-                c1, c2, c3, c4 = st.columns(4)
+                # Financial Metric Cards
+                st.write("**💰 Financial Metrics**")
+                c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
                 c2.metric("Energy Arbitrage Revenue", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
                 c3.metric("Ancillary Services Revenue", f"${metrics['Ancillary Services Revenue ($)']:,.2f}")
-                c4.metric("Capacity Revenue (Compliance)", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
-                
-                c5, c6, c7, c8 = st.columns(4)
+                c4.metric("Capacity Revenue", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
                 c5.metric("Degradation Cost", f"${metrics['Degradation Expense ($)']:,.2f}")
-                c6.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f}")
-                c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
-                c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
+                
+                # Physical vs. Arbitrage Metrics
+                st.write("**🔋 Physical Battery vs. Scheduled Arbitrage Metrics**")
+                c6, c7, c8, c9, c10 = st.columns(5)
+                c6.metric("Total Physical EFC", f"{metrics.get('Total EFC', 0.0):,.2f}", help="Total cycles including physical AGC regulation throughput.")
+                c7.metric("Arbitrage EFC (Legacy)", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f}", help="Cycles calculated from scheduled arbitrage charging/discharging only.")
+                c8.metric("Physical BESS RTE", f"{metrics.get('Physical Round-Trip Efficiency', 0.0)*100:.1f}%", help="True physical round-trip efficiency of the BESS including dynamic AGC signals.")
+                c9.metric("Arbitrage RTE (Legacy)", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%", help="Efficiency of scheduled arbitrage charging/discharging only.")
+                c10.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
 
                 st.info(f"Reported Lost Opportunity Cost (LOC): ${metrics['Reported Lost Opportunity Cost ($)']:,.2f} (Hypothetical foregone energy margin due to AS reservations)")
+
+                # Detailed metrics expander (Phases 3, 4, 5)
+                with st.expander("🔍 Detailed Physical & Operational Analysis", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.write("**🔋 Equivalent Full Cycles (EFC)**")
+                        st.metric("Arbitrage EFC", f"{metrics.get('Arbitrage EFC', 0.0):,.2f}")
+                        st.metric("AGC EFC", f"{metrics.get('AGC EFC', 0.0):,.2f}")
+                        st.metric("Total Physical EFC", f"{metrics.get('Total EFC', 0.0):,.2f}")
+                    with col2:
+                        st.write("**⚡ Physical Throughput & Efficiency**")
+                        st.metric("Arbitrage RTE", f"{metrics.get('Arbitrage Round-Trip Efficiency', 0.0)*100:.1f}%")
+                        st.metric("Physical BESS RTE", f"{metrics.get('Physical Round-Trip Efficiency', 0.0)*100:.1f}%")
+                        st.metric("Total AGC Throughput", f"{metrics.get('Total AGC Throughput (MWh)', 0.0):,.1f} MWh")
+                    with col3:
+                        st.write("**📈 Battery Utilization**")
+                        avg_soc_val = df_opt['soc_mwh'].mean()
+                        st.metric("Average SOC", f"{avg_soc_val:.2f} MWh ({avg_soc_val/(power_mw*duration_hr)*100:.1f}%)" if (power_mw*duration_hr) > 0 else f"{avg_soc_val:.2f} MWh")
+                        # Average daily cycles
+                        total_days = len(df_opt) / 24.0
+                        avg_daily_cycles = metrics.get('Total EFC', 0.0) / total_days if total_days > 0 else 0.0
+                        st.metric("Avg Daily Cycles", f"{avg_daily_cycles:.2f}")
+
+                    # AGC & Scheduled Energy details
+                    col4, col5 = st.columns(2)
+                    with col4:
+                        st.write("**⚡ Energy Arbitrage Details**")
+                        st.write(f"- **Scheduled Charge:** `{metrics.get('Charging Energy (MWh)', 0.0):,.2f} MWh`")
+                        st.write(f"- **Scheduled Discharge:** `{metrics.get('Discharging Energy (MWh)', 0.0):,.2f} MWh`")
+                    with col5:
+                        st.write("**⚡ Ancillary AGC Details**")
+                        st.write(f"- **AGC Charge Throughput:** `{metrics.get('AGC Charge Throughput (MWh)', 0.0):,.2f} MWh`")
+                        st.write(f"- **AGC Discharge Throughput:** `{metrics.get('AGC Discharge Throughput (MWh)', 0.0):,.2f} MWh`")
+                        # Add hourly metrics
+                        reg_hours = 0
+                        avg_award = 0.0
+                        if selected_market == "PJM":
+                            reg_hours = ((df_opt['RegA_MW'] > 1e-3) | (df_opt['RegD_MW'] > 1e-3)).sum()
+                            awards = df_opt.loc[(df_opt['RegA_MW'] > 1e-3) | (df_opt['RegD_MW'] > 1e-3), ['RegA_MW', 'RegD_MW']].sum(axis=1)
+                            avg_award = awards.mean() if len(awards) > 0 else 0.0
+                        elif selected_market == "MISO":
+                            reg_hours = (df_opt['REG_MW'] > 1e-3).sum()
+                            avg_award = df_opt.loc[df_opt['REG_MW'] > 1e-3, 'REG_MW'].mean() if reg_hours > 0 else 0.0
+                        elif selected_market == "ERCOT":
+                            reg_hours = ((df_opt['REGUP_MW'] > 1e-3) | (df_opt['REGDN_MW'] > 1e-3)).sum()
+                            awards = df_opt.loc[(df_opt['REGUP_MW'] > 1e-3) | (df_opt['REGDN_MW'] > 1e-3), ['REGUP_MW', 'REGDN_MW']].sum(axis=1)
+                            avg_award = awards.mean() if len(awards) > 0 else 0.0
+                        elif selected_market == "Generic":
+                            reg_hours = (df_opt['reg_mw'] > 1e-3).sum()
+                            avg_award = df_opt.loc[df_opt['reg_mw'] > 1e-3, 'reg_mw'].mean() if reg_hours > 0 else 0.0
+                        
+                        st.write(f"- **Regulation Award Hours:** `{reg_hours} hrs ({reg_hours/len(df_opt)*100:.1f}%)`")
+                        st.write(f"- **Average Regulation Award:** `{avg_award:.2f} MW`")
+
+                    # SOC Histogram
+                    st.write("**📊 SoC Distribution Histogram**")
+                    soc_hist_df = pd.DataFrame({'SoC (MWh)': df_opt['soc_mwh']})
+                    hist_chart = altair.Chart(soc_hist_df).mark_bar(color='#38BDF8').encode(
+                        x=altair.X('SoC (MWh):Q', bin=altair.Bin(maxbins=25), title='SoC (MWh)'),
+                        y=altair.Y('count():Q', title='Hours')
+                    ).properties(height=180)
+                    st.altair_chart(hist_chart, use_container_width=True)
 
                 # State of charge and dispatch tracking chart
                 st.subheader("🔋 State of Charge and Prices (HE 1-168 Example)")

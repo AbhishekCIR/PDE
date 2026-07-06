@@ -17,18 +17,25 @@ class PJM_Optimizer(BESS_Simulator_Base):
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         regA = subclass_vars['regA'][t]
         regD = subclass_vars['regD'][t]
-        
         regA_val = regA.varValue if is_value else regA
         regD_val = regD.varValue if is_value else regD
-        
         if regA_val is None: regA_val = 0.0
         if regD_val is None: regD_val = 0.0
+
+        # Get dynamic mileages
+        mileage_a = self.current_df['Mileage_RegA'].iloc[t] if hasattr(self, 'current_df') and 'Mileage_RegA' in self.current_df.columns else 1.2
+        mileage_d = self.current_df['Mileage_RegD'].iloc[t] if hasattr(self, 'current_df') and 'Mileage_RegD' in self.current_df.columns else 3.5
+        
+        throughput_a = regA_val * mileage_a * self.reg_throughput_factor * 0.5
+        throughput_d = regD_val * mileage_d * self.reg_throughput_factor * 0.5
         
         # PJM dual regulation (RegA + RegD) RTE loss depletion
-        return (regA_val + regD_val) * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
+        return (throughput_a + throughput_d) * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
-    def generate_sample_data(self, days=365, freq='1h'):
+    def generate_sample_data(self, days=365, freq='1h', random_seed=None):
         """Generates synthetic PJM prices for 1 year."""
+        if random_seed is not None:
+            np.random.seed(random_seed)
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
@@ -205,9 +212,21 @@ class PJM_Optimizer(BESS_Simulator_Base):
         total_discharge_mwh = (df_out['discharge_mw'] * timestep_hours).sum()
         total_charge_mwh = (df_out['charge_mw'] * timestep_hours).sum()
         
-        efc = total_discharge_mwh / self.energy_mwh
+        mileage_a = df_out['Mileage_RegA'] if 'Mileage_RegA' in df_out.columns else 1.2
+        mileage_d = df_out['Mileage_RegD'] if 'Mileage_RegD' in df_out.columns else 3.5
         
-        achieved_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        agc_throughput_a = df_out['RegA_MW'] * mileage_a * self.reg_throughput_factor * 0.5
+        agc_throughput_d = df_out['RegD_MW'] * mileage_d * self.reg_throughput_factor * 0.5
+        total_agc_discharge_mwh = ((agc_throughput_a + agc_throughput_d) * timestep_hours).sum()
+        total_agc_charge_mwh = total_agc_discharge_mwh
+        
+        arb_efc = total_discharge_mwh / self.energy_mwh
+        agc_efc = total_agc_discharge_mwh / self.energy_mwh
+        total_efc = arb_efc + agc_efc
+        
+        arb_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        physical_rte = ((total_discharge_mwh + total_agc_discharge_mwh) / 
+                        (total_charge_mwh + total_agc_charge_mwh)) if (total_charge_mwh + total_agc_charge_mwh) > 0 else 0.0
         
         as_sum = (df_out['RegA_MW'] + df_out['RegD_MW'] + df_out['SYNCH_MW'] + df_out['NONSYNCH_MW'])
         as_fraction = (as_sum > 1e-3).mean()
@@ -227,10 +246,18 @@ class PJM_Optimizer(BESS_Simulator_Base):
             'Static Capacity Revenue ($)': capacity_rev,
             'Degradation Expense ($)': deg_expense,
             'Reported Lost Opportunity Cost ($)': loc_sum,
-            'Equivalent Full Cycles (EFC)': efc,
-            'Achieved Round-Trip Efficiency': achieved_rte,
+            'Equivalent Full Cycles (EFC)': arb_efc, # Backward compatibility
+            'Arbitrage EFC': arb_efc,
+            'AGC EFC': agc_efc,
+            'Total EFC': total_efc,
+            'Achieved Round-Trip Efficiency': arb_rte, # Backward compatibility
+            'Arbitrage Round-Trip Efficiency': arb_rte,
+            'Physical Round-Trip Efficiency': physical_rte,
             'Charging Energy (MWh)': total_charge_mwh,
             'Discharging Energy (MWh)': total_discharge_mwh,
+            'AGC Charge Throughput (MWh)': total_agc_charge_mwh,
+            'AGC Discharge Throughput (MWh)': total_agc_discharge_mwh,
+            'Total AGC Throughput (MWh)': total_agc_charge_mwh + total_agc_discharge_mwh,
             'Ancillary Participation Fraction': as_fraction
         }
         

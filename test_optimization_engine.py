@@ -52,7 +52,7 @@ class TestBESSOptimizer(unittest.TestCase):
             
             # 3. Check state of charge dynamics
             reg = df_opt['reg_mw'].iloc[t] if 'reg_mw' in df_opt.columns else 0.0
-            soc_impact = reg * self.optimizer.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
+            soc_impact = reg * self.optimizer.reg_throughput_factor * 0.5 * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
             expected_soc = current_soc + charge * self.eff_c * timestep_hours - (discharge / self.eff_d) * timestep_hours + soc_impact
             self.assertAlmostEqual(soc, expected_soc, places=3, msg=f"SoC mismatch at index {t}")
             
@@ -352,7 +352,8 @@ class TestBESSOptimizer(unittest.TestCase):
                 soc = df_opt['soc_mwh'].iloc[t]
                 rega = df_opt['RegA_MW'].iloc[t]
                 
-                soc_impact = rega * pjm_opt.reg_throughput_factor * (eff_c - 1.0 / eff_d) * dt
+                mileage_a = df_opt['Mileage_RegA'].iloc[t] if 'Mileage_RegA' in df_opt.columns else 1.2
+                soc_impact = rega * mileage_a * pjm_opt.reg_throughput_factor * 0.5 * (eff_c - 1.0 / eff_d) * dt
                 expected_soc = current_soc + charge * eff_c * dt - (discharge / eff_d) * dt + soc_impact
                 
                 self.assertAlmostEqual(soc, expected_soc, places=2, 
@@ -481,6 +482,81 @@ class TestBESSOptimizer(unittest.TestCase):
             regd = df_opt['RegD_MW'].iloc[t]
             self.assertFalse(rega > 1e-3 and regd > 1e-3, 
                              f"RegA ({rega} MW) and RegD ({regd} MW) cleared simultaneously at index {t}")
+
+    def test_agc_throughput_and_soc_physical_consistency(self):
+        """Verifies Phase 2 physical SOC updates and energy conservation including mileage and 0.5 factor."""
+        pjm_opt = PJM_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5
+        )
+        df = pjm_opt.generate_sample_data(days=2, random_seed=42)
+        df_opt = pjm_opt.run_optimization_dispatch(df)
+        
+        # Test physical SOC updates
+        current_soc = pjm_opt.initial_soc
+        dt = 1.0
+        
+        for t in range(len(df_opt)):
+            c = df_opt['charge_mw'].iloc[t]
+            d = df_opt['discharge_mw'].iloc[t]
+            soc = df_opt['soc_mwh'].iloc[t]
+            rega = df_opt['RegA_MW'].iloc[t]
+            regd = df_opt['RegD_MW'].iloc[t]
+            mil_a = df_opt['Mileage_RegA'].iloc[t]
+            mil_d = df_opt['Mileage_RegD'].iloc[t]
+            
+            # Physical one-way throughput with 0.5 and mileage
+            thru_a = rega * mil_a * pjm_opt.reg_throughput_factor * 0.5
+            thru_d = regd * mil_d * pjm_opt.reg_throughput_factor * 0.5
+            
+            expected_soc = (current_soc + 
+                            c * pjm_opt.eff_c * dt - 
+                            (d / pjm_opt.eff_d) * dt + 
+                            (thru_a + thru_d) * (pjm_opt.eff_c - 1.0 / pjm_opt.eff_d) * dt)
+            
+            self.assertAlmostEqual(soc, expected_soc, places=3, 
+                                   msg=f"Physical SOC dynamics failed at index {t}")
+            current_soc = soc
+
+    def test_efc_and_rte_reconciliation(self):
+        """Verifies Phase 3 and 4 EFC and RTE metrics reconcile with actual energy throughput."""
+        pjm_opt = PJM_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5
+        )
+        df = pjm_opt.generate_sample_data(days=2, random_seed=42)
+        df_opt = pjm_opt.run_optimization_dispatch(df)
+        metrics, _ = pjm_opt.calculate_summary_metrics(df_opt)
+        
+        # EFC reconciliation
+        self.assertAlmostEqual(metrics['Total EFC'], metrics['Arbitrage EFC'] + metrics['AGC EFC'], places=4)
+        
+        # RTE bounds check
+        self.assertTrue(0.85 <= metrics['Physical Round-Trip Efficiency'] <= 1.05,
+                        f"Physical RTE {metrics['Physical Round-Trip Efficiency']} out of bounds")
+        
+        # Arbitrage RTE should match backward compatible Achieved RTE
+        self.assertEqual(metrics['Arbitrage Round-Trip Efficiency'], metrics['Achieved Round-Trip Efficiency'])
+        
+        # EFC should match backward compatible EFC
+        self.assertEqual(metrics['Arbitrage EFC'], metrics['Equivalent Full Cycles (EFC)'])
+
+    def test_deterministic_reproducible_seed(self):
+        """Verifies Phase 7 configurable deterministic random seed behavior."""
+        pjm_opt = PJM_Optimizer()
+        
+        # Generate with seed=42 twice
+        df1 = pjm_opt.generate_sample_data(days=5, random_seed=42)
+        df2 = pjm_opt.generate_sample_data(days=5, random_seed=42)
+        
+        # Assert they are identical
+        pd.testing.assert_frame_equal(df1, df2)
+        
+        # Generate with seed=43
+        df3 = pjm_opt.generate_sample_data(days=5, random_seed=43)
+        
+        # Assert different seed yields different values
+        self.assertFalse(df1.equals(df3))
 
 if __name__ == '__main__':
     unittest.main()

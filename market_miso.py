@@ -20,11 +20,14 @@ class MISO_Optimizer(BESS_Simulator_Base):
         reg_val = reg.varValue if is_value else reg
         if reg_val is None:
             reg_val = 0.0
-        # MISO bidirectional regulation RTE loss depletion
-        return reg_val * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
+        # MISO bidirectional regulation RTE loss depletion (scaled by m_to_c_ratio and 0.5 factor)
+        throughput = reg_val * self.m_to_c_ratio * self.reg_throughput_factor * 0.5
+        return throughput * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
-    def generate_sample_data(self, days=365, freq='1h'):
+    def generate_sample_data(self, days=365, freq='1h', random_seed=None):
         """Generates synthetic MISO prices for 1 year."""
+        if random_seed is not None:
+            np.random.seed(random_seed)
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
@@ -157,9 +160,17 @@ class MISO_Optimizer(BESS_Simulator_Base):
         total_discharge_mwh = (df_out['discharge_mw'] * timestep_hours).sum()
         total_charge_mwh = (df_out['charge_mw'] * timestep_hours).sum()
         
-        efc = total_discharge_mwh / self.energy_mwh
+        agc_throughput = df_out['REG_MW'] * self.m_to_c_ratio * self.reg_throughput_factor * 0.5
+        total_agc_discharge_mwh = (agc_throughput * timestep_hours).sum()
+        total_agc_charge_mwh = total_agc_discharge_mwh
         
-        achieved_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        arb_efc = total_discharge_mwh / self.energy_mwh
+        agc_efc = total_agc_discharge_mwh / self.energy_mwh
+        total_efc = arb_efc + agc_efc
+        
+        arb_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
+        physical_rte = ((total_discharge_mwh + total_agc_discharge_mwh) / 
+                        (total_charge_mwh + total_agc_charge_mwh)) if (total_charge_mwh + total_agc_charge_mwh) > 0 else 0.0
         
         as_sum = (df_out['REG_MW'] + df_out['SPIN_MW'] + df_out['SUPP_MW'])
         as_fraction = (as_sum > 1e-3).mean()
@@ -178,10 +189,18 @@ class MISO_Optimizer(BESS_Simulator_Base):
             'Static Capacity Revenue ($)': capacity_rev,
             'Degradation Expense ($)': deg_expense,
             'Reported Lost Opportunity Cost ($)': loc_sum,
-            'Equivalent Full Cycles (EFC)': efc,
-            'Achieved Round-Trip Efficiency': achieved_rte,
+            'Equivalent Full Cycles (EFC)': arb_efc, # Backward compatibility
+            'Arbitrage EFC': arb_efc,
+            'AGC EFC': agc_efc,
+            'Total EFC': total_efc,
+            'Achieved Round-Trip Efficiency': arb_rte, # Backward compatibility
+            'Arbitrage Round-Trip Efficiency': arb_rte,
+            'Physical Round-Trip Efficiency': physical_rte,
             'Charging Energy (MWh)': total_charge_mwh,
             'Discharging Energy (MWh)': total_discharge_mwh,
+            'AGC Charge Throughput (MWh)': total_agc_charge_mwh,
+            'AGC Discharge Throughput (MWh)': total_agc_discharge_mwh,
+            'Total AGC Throughput (MWh)': total_agc_charge_mwh + total_agc_discharge_mwh,
             'Ancillary Participation Fraction': as_fraction
         }
         
