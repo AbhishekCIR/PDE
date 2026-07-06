@@ -180,12 +180,13 @@ if st.session_state['data_df'] is not None:
         with st.spinner("Executing MILP solver..."):
             try:
                 # 1. Initialize Optimizer with sidebar settings
+                is_tolling_flag = (selected_mode == "Tolling Agreement")
                 if selected_market == "ERCOT":
                     optimizer = ERCOT_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
-                        reg_throughput_factor=reg_throughput_factor
+                        reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
                 elif selected_market == "MISO":
                     optimizer = MISO_Optimizer(
@@ -193,7 +194,7 @@ if st.session_state['data_df'] is not None:
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
                         capacity_price_mw_day=capacity_price_mw_day,
-                        reg_throughput_factor=reg_throughput_factor
+                        reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
                 elif selected_market == "PJM":
                     optimizer = PJM_Optimizer(
@@ -201,14 +202,14 @@ if st.session_state['data_df'] is not None:
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
                         capacity_price_mw_day=capacity_price_mw_day,
-                        reg_throughput_factor=reg_throughput_factor
+                        reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
                 else:
                     optimizer = Generic_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
                         max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
                         degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
-                        reg_throughput_factor=reg_throughput_factor
+                        reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
 
                 # Set capacity credit derating factors in config dynamically

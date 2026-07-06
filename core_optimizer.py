@@ -9,7 +9,7 @@ import os
 class BESS_Simulator_Base:
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 market_name="Generic", reg_throughput_factor=0.15):
+                 market_name="Generic", reg_throughput_factor=0.15, is_tolling=False):
         self.power_mw = power_mw
         self.duration_hr = duration_hr
         self.energy_mwh = power_mw * duration_hr
@@ -22,6 +22,7 @@ class BESS_Simulator_Base:
         self.mileage_factor = mileage_factor
         self.market_name = market_name
         self.reg_throughput_factor = reg_throughput_factor
+        self.is_tolling = is_tolling
         
         # Load external market config
         self.config = self.load_market_config()
@@ -332,8 +333,11 @@ class BESS_Simulator_Base:
         for key, val in market_res_dicts.items():
             df_out[key] = val
             
-        # 1. Base Energy Arbitrage Revenue (actual pricing)
-        df_out['Energy_Revenue'] = (df_out['discharge_mw'] - df_out['charge_mw']) * df['LMP'] * timestep_hours
+        if self.is_tolling:
+            charge_lmp = 0.0
+        else:
+            charge_lmp = df['Charge_LMP'] if 'Charge_LMP' in df.columns else df['LMP']
+        df_out['Energy_Revenue'] = df_out['discharge_mw'] * df['LMP'] * timestep_hours - df_out['charge_mw'] * charge_lmp * timestep_hours
         
         # 2. Energy Degradation Cost (actual executed dispatch)
         df_out['Energy_Degradation_Cost'] = (df_out['charge_mw'] * self.eff_c + df_out['discharge_mw'] / self.eff_d) * timestep_hours * self.deg_cost

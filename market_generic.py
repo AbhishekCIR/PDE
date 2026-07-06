@@ -7,10 +7,10 @@ from core_optimizer import BESS_Simulator_Base
 class Generic_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 reg_throughput_factor=0.15):
+                 reg_throughput_factor=0.15, is_tolling=False):
         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
                          degradation_cost_per_mwh, mileage_factor, market_name="Generic",
-                         reg_throughput_factor=reg_throughput_factor)
+                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling)
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         reg = subclass_vars['reg'][t]
@@ -76,7 +76,7 @@ class Generic_Optimizer(BESS_Simulator_Base):
 
     def calculate_market_revenues(self, df_out, timestep_hours):
         """Calculates revenue columns post-optimization."""
-        df_out['reg_revenue'] = df_out['reg_mw'] * df_out['Reg_Price'] * timestep_hours - df_out['reg_mw'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['reg_revenue'] = df_out['reg_mw'] * df_out['Reg_Price'] * timestep_hours
         df_out['Ancillary_Revenue'] = df_out['reg_revenue']
         df_out['Capacity_Revenue'] = 0.0
         

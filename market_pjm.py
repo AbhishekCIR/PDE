@@ -7,10 +7,10 @@ from core_optimizer import BESS_Simulator_Base
 class PJM_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 capacity_price_mw_day=120.0, reg_throughput_factor=0.15):
+                 capacity_price_mw_day=120.0, reg_throughput_factor=0.15, is_tolling=False):
         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
                          degradation_cost_per_mwh, mileage_factor, market_name="PJM",
-                         reg_throughput_factor=reg_throughput_factor)
+                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling)
         
         self.capacity_price_mw_day = capacity_price_mw_day
 
@@ -105,8 +105,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
             prob += c[t] + regA[t] + regD[t] <= self.power_mw
             
             # State of Charge Reservation Constraints (Sustainability)
-            prob += soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
-            prob += self.energy_mwh - soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd) * timestep_hours
+            prob += soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch)
+            prob += self.energy_mwh - soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd)
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for PJM ancillary service revenues."""
@@ -160,8 +160,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         perf_a = self.config.get("default_performance_score", {}).get("RegA", 0.90)
         perf_d = self.config.get("default_performance_score", {}).get("RegD", 0.95)
         
-        df_out['RegA_Revenue'] = df_out['RegA_MW'] * (df_out['RMCCP_A'] * perf_a + df_out['RMPCP_A'] * df_out['Mileage_RegA'] * perf_a) * timestep_hours - df_out['RegA_MW'] * df_out['Mileage_RegA'] * timestep_hours * self.deg_cost * self.mileage_factor
-        df_out['RegD_Revenue'] = df_out['RegD_MW'] * (df_out['RMCCP_D'] * perf_d + df_out['RMPCP_D'] * df_out['Mileage_RegD'] * perf_d) * timestep_hours - df_out['RegD_MW'] * df_out['Mileage_RegD'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['RegA_Revenue'] = df_out['RegA_MW'] * (df_out['RMCCP_A'] * perf_a + df_out['RMPCP_A'] * df_out['Mileage_RegA'] * perf_a) * timestep_hours
+        df_out['RegD_Revenue'] = df_out['RegD_MW'] * (df_out['RMCCP_D'] * perf_d + df_out['RMPCP_D'] * df_out['Mileage_RegD'] * perf_d) * timestep_hours
         df_out['SYNCH_Revenue'] = df_out['SYNCH_MW'] * df_out['Price_SYNCH'] * timestep_hours
         df_out['NONSYNCH_Revenue'] = df_out['NONSYNCH_MW'] * df_out['Price_NONSYNCH'] * timestep_hours
         

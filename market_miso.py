@@ -7,13 +7,13 @@ from core_optimizer import BESS_Simulator_Base
 class MISO_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 capacity_price_mw_day=50.0, reg_throughput_factor=0.15):
-         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
-                          degradation_cost_per_mwh, mileage_factor, market_name="MISO",
-                          reg_throughput_factor=reg_throughput_factor)
+                 capacity_price_mw_day=50.0, reg_throughput_factor=0.15, is_tolling=False):
+        super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
+                         degradation_cost_per_mwh, mileage_factor, market_name="MISO",
+                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling)
          
-         self.m_to_c_ratio = self.config.get("m_to_c_ratio", 7.2)
-         self.capacity_price_mw_day = capacity_price_mw_day
+        self.m_to_c_ratio = self.config.get("m_to_c_ratio", 7.2)
+        self.capacity_price_mw_day = capacity_price_mw_day
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         reg = subclass_vars['reg'][t]
@@ -77,9 +77,8 @@ class MISO_Optimizer(BESS_Simulator_Base):
             prob += d[t] + reg[t] + spin[t] + supp[t] <= self.power_mw
             prob += c[t] + reg[t] <= self.power_mw
             
-            # State of Charge Reservation Constraints (Sustainability)
-            prob += soc[t] >= (reg[t] * dur_reg + spin[t] * dur_spin + supp[t] * dur_supp) * timestep_hours
-            prob += self.energy_mwh - soc[t] >= reg[t] * dur_reg * timestep_hours
+            prob += soc[t] >= (reg[t] * dur_reg + spin[t] * dur_spin + supp[t] * dur_supp)
+            prob += self.energy_mwh - soc[t] >= reg[t] * dur_reg
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for MISO ancillary service revenues."""
@@ -98,8 +97,7 @@ class MISO_Optimizer(BESS_Simulator_Base):
             clearing_rev = (reg[t] * REG_CAP_p[t] + reg[t] * self.m_to_c_ratio * REG_MIL_p[t] + 
                              spin[t] * SPIN_p[t] + supp[t] * SUPP_p[t]) * timestep_hours
             
-            # Regulation degradation penalty
-            reg_deg = reg[t] * timestep_hours * self.deg_cost * self.mileage_factor
+            reg_deg = reg[t] * self.m_to_c_ratio * timestep_hours * self.deg_cost * self.mileage_factor
             
             as_rev_terms.append(clearing_rev - reg_deg)
             
@@ -117,7 +115,7 @@ class MISO_Optimizer(BESS_Simulator_Base):
         """Calculates revenue columns post-optimization."""
         df_out['REG_CAP_Revenue'] = df_out['REG_MW'] * df_out['REG_CAP'] * timestep_hours
         df_out['REG_MIL_Revenue'] = df_out['REG_MW'] * self.m_to_c_ratio * df_out['REG_MIL'] * timestep_hours
-        df_out['REG_Revenue'] = df_out['REG_CAP_Revenue'] + df_out['REG_MIL_Revenue'] - df_out['REG_MW'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['REG_Revenue'] = df_out['REG_CAP_Revenue'] + df_out['REG_MIL_Revenue']
         df_out['SPIN_Revenue'] = df_out['SPIN_MW'] * df_out['SPIN'] * timestep_hours
         df_out['SUPP_Revenue'] = df_out['SUPP_MW'] * df_out['SUPP'] * timestep_hours
         
@@ -129,7 +127,7 @@ class MISO_Optimizer(BESS_Simulator_Base):
         hourly_capacity_rate = (self.power_mw * elcc * self.capacity_price_mw_day) / 24.0
         df_out['Capacity_Revenue'] = hourly_capacity_rate * timestep_hours
         
-        df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + df_out['REG_MW'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + df_out['REG_MW'] * self.m_to_c_ratio * timestep_hours * self.deg_cost * self.mileage_factor
         
         # Net operational merchant revenue
         df_out['revenue'] = (df_out['Energy_Revenue'] + df_out['Ancillary_Revenue'] + 

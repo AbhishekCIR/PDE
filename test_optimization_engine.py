@@ -228,5 +228,259 @@ class TestBESSOptimizer(unittest.TestCase):
             reg = df_opt_15['REG_MW'].iloc[t]
             self.assertTrue(soc >= reg - 1e-3, f"SOC {soc} went below REG_MW {reg} at index {t}")
 
+    def test_gross_revenue_reporting_and_no_double_subtraction(self):
+        """Verifies that product revenues are gross (no O&M/degradation cost subtracted)
+        and that Net Merchant Revenue = Gross Revenues - Total Degradation Cost.
+        """
+        pjm_opt = PJM_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5,
+            degradation_cost_per_mwh=10.0, mileage_factor=0.20
+        )
+        df = pjm_opt.generate_sample_data(days=1)
+        df_opt = pjm_opt.run_optimization_dispatch(df)
+        
+        # Verify that the net merchant revenue equals energy + ancillary + capacity - total degradation
+        for t in range(len(df_opt)):
+            energy_rev = df_opt['Energy_Revenue'].iloc[t]
+            anc_rev = df_opt['Ancillary_Revenue'].iloc[t]
+            cap_rev = df_opt['Capacity_Revenue'].iloc[t]
+            deg_cost = df_opt['Total_Degradation_Cost'].iloc[t]
+            net_rev = df_opt['revenue'].iloc[t]
+            
+            # Check relation: net_rev == energy_rev + anc_rev + cap_rev - deg_cost
+            self.assertAlmostEqual(net_rev, energy_rev + anc_rev + cap_rev - deg_cost, places=3)
+            
+            # Check that individual RegA/RegD revenues do not subtract degradation internally (they are gross)
+            rega_mw = df_opt['RegA_MW'].iloc[t]
+            if rega_mw > 1e-3:
+                perf_a = pjm_opt.config.get("default_performance_score", {}).get("RegA", 0.90)
+                gross_rega = rega_mw * (df_opt['RMCCP_A'].iloc[t] * perf_a + df_opt['RMPCP_A'].iloc[t] * df_opt['Mileage_RegA'].iloc[t] * perf_a)
+                self.assertAlmostEqual(df_opt['RegA_Revenue'].iloc[t], gross_rega, places=3)
+
+    def test_miso_degradation_scaling_scaled_by_m_to_c_ratio(self):
+        """Verifies that MISO regulation degradation cost is properly scaled by self.m_to_c_ratio (7.2)."""
+        miso_opt = MISO_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5,
+            degradation_cost_per_mwh=10.0, mileage_factor=0.20
+        )
+        df = miso_opt.generate_sample_data(days=1)
+        df_opt = miso_opt.run_optimization_dispatch(df)
+        
+        for t in range(len(df_opt)):
+            reg_mw = df_opt['REG_MW'].iloc[t]
+            if reg_mw > 1e-3:
+                expected_reg_deg = reg_mw * miso_opt.m_to_c_ratio * 1.0 * miso_opt.deg_cost * miso_opt.mileage_factor
+                total_deg = df_opt['Total_Degradation_Cost'].iloc[t]
+                energy_deg = df_opt['Energy_Degradation_Cost'].iloc[t]
+                self.assertAlmostEqual(total_deg - energy_deg, expected_reg_deg, places=3)
+
+    def test_tolling_agreement_energy_revenue_calculation(self):
+        """Verifies that in tolling agreement mode, Energy_Revenue does not subtract charging costs."""
+        # Create a day of data where we charge at positive prices and discharge at higher prices
+        timestamps = pd.date_range(start="2026-01-01", periods=24, freq='h')
+        df = pd.DataFrame({
+            'timestamp': timestamps,
+            'LMP': [40.0] * 24,
+            'Reg_Price': [0.0] * 24
+        })
+        df.loc[2:4, 'LMP'] = 20.0  # Charge here
+        df.loc[18:19, 'LMP'] = 100.0 # Discharge here
+        
+        toller = Generic_Optimizer(
+            power_mw=self.power_mw, duration_hr=self.duration_hr, rte=self.rte,
+            max_cycles_per_day=self.max_cycles, initial_soc_pct=0.5,
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10, is_tolling=True
+        )
+        df_opt = toller.run_optimization_dispatch(df)
+        
+        # Verify Energy_Revenue = discharge_mw * LMP (charging cost is not subtracted)
+        total_discharge_rev = (df_opt['discharge_mw'] * df_opt['LMP']).sum()
+        total_energy_rev = df_opt['Energy_Revenue'].sum()
+        self.assertAlmostEqual(total_energy_rev, total_discharge_rev, places=3)
+        self.assertTrue(df_opt['charge_mw'].sum() > 0.0) # Confirms BESS did charge
+
+    def test_multiple_timestep_resolutions(self):
+        """Verifies optimization, SOC bounds, and SOC reserve duration requirements
+        across multiple sub-hourly and hourly resolutions (5-min, 15-min, 30-min, 60-min).
+        """
+        pjm_opt = PJM_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5,
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10
+        )
+        
+        resolutions = [
+            ('5min', 12 * 24),   # 5-minute data
+            ('15min', 4 * 24),   # 15-minute data
+            ('30min', 2 * 24),   # 30-minute data
+            ('h', 24)            # Hourly data
+        ]
+        
+        for freq, periods in resolutions:
+            timestamps = pd.date_range(start="2026-01-01", periods=periods, freq=freq)
+            dt = (timestamps[1] - timestamps[0]).total_seconds() / 3600.0
+            
+            # Simple price profile with a high-price spike to trigger discharging
+            df = pd.DataFrame({
+                'timestamp': timestamps,
+                'LMP': [30.0] * periods,
+                'RMCCP_A': [10.0] * periods,
+                'RMPCP_A': [2.0] * periods,
+                'RMCCP_D': [0.0] * periods,
+                'RMPCP_D': [0.0] * periods,
+                'Mileage_RegA': [1.2] * periods,
+                'Mileage_RegD': [0.0] * periods,
+                'Price_SYNCH': [0.0] * periods,
+                'Price_NONSYNCH': [0.0] * periods
+            })
+            # Make HE 18 spike to 200.0 for discharging
+            spike_idx = int(18 / dt)
+            df.loc[spike_idx:spike_idx+1, 'LMP'] = 200.0
+            
+            df_opt = pjm_opt.run_optimization_dispatch(df)
+            
+            # 1. Verify SOC balance holds exactly for this dt
+            current_soc = pjm_opt.initial_soc
+            eff_c = pjm_opt.eff_c
+            eff_d = pjm_opt.eff_d
+            
+            for t in range(len(df_opt)):
+                charge = df_opt['charge_mw'].iloc[t]
+                discharge = df_opt['discharge_mw'].iloc[t]
+                soc = df_opt['soc_mwh'].iloc[t]
+                rega = df_opt['RegA_MW'].iloc[t]
+                
+                soc_impact = rega * pjm_opt.reg_throughput_factor * (eff_c - 1.0 / eff_d) * dt
+                expected_soc = current_soc + charge * eff_c * dt - (discharge / eff_d) * dt + soc_impact
+                
+                self.assertAlmostEqual(soc, expected_soc, places=2, 
+                                       msg=f"SOC mismatch at index {t} for resolution {freq}")
+                current_soc = soc
+                
+                # 2. Verify sub-hourly SOC reserve duration constraint:
+                # RegA has duration 1.0h, so minimum SOC req is 10.0 * 1.0 = 10.0 MWh.
+                # It should NOT be scaled down by dt (which would be 0.83 MWh for 5-min or 2.5 MWh for 15-min).
+                if rega > 1e-3:
+                    self.assertTrue(soc >= rega * 1.0 - 1e-3, 
+                                    f"Sub-hourly SOC constraint failed for {freq}: soc={soc}, rega={rega}")
+
+    def test_revenue_objective_reconciliation(self):
+        """Validates that reported net revenue exactly reconciles to the sum of
+        Energy_Revenue + Ancillary_Revenue + Capacity_Revenue - Total_Degradation_Cost.
+        """
+        pjm_opt = PJM_Optimizer(
+            power_mw=5.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.5, initial_soc_pct=0.5,
+            degradation_cost_per_mwh=8.0, mileage_factor=0.15,
+            capacity_price_mw_day=100.0
+        )
+        df = pjm_opt.generate_sample_data(days=2)
+        df_opt = pjm_opt.run_optimization_dispatch(df)
+        
+        # Verify net hourly revenue column equals component sum in every single interval
+        for t in range(len(df_opt)):
+            comp_net = (df_opt['Energy_Revenue'].iloc[t] + 
+                        df_opt['Ancillary_Revenue'].iloc[t] + 
+                        df_opt['Capacity_Revenue'].iloc[t] - 
+                        df_opt['Total_Degradation_Cost'].iloc[t])
+            self.assertAlmostEqual(df_opt['revenue'].iloc[t], comp_net, places=4)
+
+    def test_deterministic_benchmark_scenario(self):
+        """Verifies optimization logic against a simple deterministic benchmark scenario
+        with a known mathematically optimal solution (100% RTE, no degradation).
+        """
+        # 10 MW BESS with 40 MWh capacity (4h duration), 100% RTE, 0 degradation
+        benchmark_opt = Generic_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=1.0,
+            max_cycles_per_day=1.0, initial_soc_pct=0.0,  # Start empty
+            degradation_cost_per_mwh=0.0, mileage_factor=0.0
+        )
+        
+        timestamps = pd.date_range(start="2026-01-01", periods=24, freq='h')
+        df = pd.DataFrame({
+            'timestamp': timestamps,
+            'LMP': [30.0] * 24,
+            'Reg_Price': [0.0] * 24
+        })
+        # Set exact low price to charge
+        df.loc[8, 'LMP'] = 10.0   # HE 9: Price is $10 -> Charge
+        # Set exact high price to discharge
+        df.loc[17, 'LMP'] = 150.0 # HE 18: Price is $150 -> Discharge
+        
+        df_opt = benchmark_opt.run_optimization_dispatch(df)
+        
+        # Verify perfect foresight dispatch matches the exact known optimal schedule
+        # Charge at HE 9 (index 8): 10 MW
+        self.assertAlmostEqual(df_opt['charge_mw'].iloc[8], 10.0, places=3)
+        # Discharge at HE 18 (index 17): 10 MW
+        self.assertAlmostEqual(df_opt['discharge_mw'].iloc[17], 10.0, places=3)
+        # Net revenue should be exactly 10 MW * 1h * ($150 - $10) = $1,400.0
+        self.assertAlmostEqual(df_opt['revenue'].sum(), 1400.0, places=3)
+
+    def test_stress_testing_flat_prices(self):
+        """Verifies BESS remains idle when prices are flat and degradation/losses are present."""
+        flat_opt = Generic_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.0,
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10
+        )
+        timestamps = pd.date_range(start="2026-01-01", periods=24, freq='h')
+        df = pd.DataFrame({
+            'timestamp': timestamps,
+            'LMP': [30.0] * 24, # Flat LMP
+            'Reg_Price': [0.0] * 24 # No Ancillary service payments
+        })
+        df_opt = flat_opt.run_optimization_dispatch(df)
+        
+        # BESS should stay completely idle because arbitrage cannot cover RTE loss and degradation
+        self.assertAlmostEqual(df_opt['charge_mw'].sum(), 0.0, places=3)
+        self.assertAlmostEqual(df_opt['discharge_mw'].sum(), 0.0, places=3)
+
+    def test_stress_testing_negative_prices(self):
+        """Verifies that BESS charges during negative prices even if there is no high discharge price,
+        as charging at a negative price is directly profitable.
+        """
+        neg_opt = Generic_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.0,  # Start empty
+            degradation_cost_per_mwh=5.0, mileage_factor=0.10
+        )
+        timestamps = pd.date_range(start="2026-01-01", periods=24, freq='h')
+        df = pd.DataFrame({
+            'timestamp': timestamps,
+            'LMP': [0.0] * 24,
+            'Reg_Price': [0.0] * 24
+        })
+        # Set negative prices during HE 3-6 (index 2-5)
+        df.loc[2:5, 'LMP'] = -50.0
+        
+        df_opt = neg_opt.run_optimization_dispatch(df)
+        
+        # Battery should charge during negative prices (making profit directly by charging)
+        charge_neg = df_opt['charge_mw'].iloc[2:6].sum()
+        self.assertTrue(charge_neg > 0.0)
+        
+        # Verify that it got paid for charging
+        energy_rev = df_opt['Energy_Revenue'].sum()
+        self.assertTrue(energy_rev > 0.0) # Net energy revenue must be positive since we charged at -$50
+
+    def test_market_rule_enforcement_rega_regd_exclusivity(self):
+        """Verifies PJM-specific market rule: RegA and RegD are mutually exclusive."""
+        pjm_opt = PJM_Optimizer(
+            power_mw=10.0, duration_hr=4.0, rte=0.90,
+            max_cycles_per_day=1.0, initial_soc_pct=0.5
+        )
+        df = pjm_opt.generate_sample_data(days=5)
+        df_opt = pjm_opt.run_optimization_dispatch(df)
+        
+        # Verify that in no hour did the battery clear both RegA and RegD simultaneously
+        for t in range(len(df_opt)):
+            rega = df_opt['RegA_MW'].iloc[t]
+            regd = df_opt['RegD_MW'].iloc[t]
+            self.assertFalse(rega > 1e-3 and regd > 1e-3, 
+                             f"RegA ({rega} MW) and RegD ({regd} MW) cleared simultaneously at index {t}")
+
 if __name__ == '__main__':
     unittest.main()

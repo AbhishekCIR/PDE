@@ -195,3 +195,45 @@ pywintypes.com_error: (-2147352567, 'Exception occurred.', (0, None, "The specif
 2026-07-02 13:30:13,368 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
 2026-07-02 13:30:13,371 - matplotlib.category - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
 2026-07-02 13:30:19,598 - bess_platform_bridge - INFO - Excel financial model update completed successfully!
+2026-07-06 13:13:40,798 - bess_platform_bridge - INFO - ==================================================
+2026-07-06 13:13:40,799 - bess_platform_bridge - INFO - Executing BESS Optimization from Excel Bridge...
+2026-07-06 13:13:40,800 - bess_platform_bridge - INFO - ==================================================
+2026-07-06 13:13:40,800 - bess_platform_bridge - INFO - Book.caller() failed. Opening workbook '260511-FM-SanAngelo_(Solar+BESS)_V1_SV_AK.xlsb' directly for CLI testing.
+2026-07-06 13:13:44,072 - bess_platform_bridge - INFO - Configuration block already exists.
+2026-07-06 13:13:44,141 - bess_platform_bridge - INFO - Loaded Inputs: Market=ERCOT, Solver=Perfect Foresight, Year=2025, Mode=Merchant Only
+2026-07-06 13:13:44,141 - bess_platform_bridge - INFO - BESS Specs: Power=300.0MW, Duration=4.0h, RTE=0.88, Cycles=1.0, DegCost=$5.0, RegThroughput=0.15
+2026-07-06 13:13:44,143 - bess_platform_bridge - INFO - Loading price telemetry from file: C:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\data\telemetry\ercot_2025_hourly.csv
+2026-07-06 13:13:44,217 - bess_platform_bridge - INFO - Telemetry Validation: Info: Found 5 negative energy prices (LMP). Solver will treat this as profit to charge.
+2026-07-06 13:14:14,287 - bess_platform_bridge - INFO - Solve completed successfully. Total operational revenue calculated: $21,947,293.28
+2026-07-06 13:14:23,643 - bess_platform_bridge - ERROR - Error executing optimization bridge: (-2147352567, 'Exception occurred.', (0, 'Microsoft Excel', "The cell or chart you're trying to change is on a protected sheet. To make a change, unprotect the sheet. You might be requested to enter a password.", 'xlmain11.chm', 0, -2146827284), None)
+Traceback (most recent call last):
+  File "c:\Users\abhishek\Desktop\Financial models\FM deliverable\BESS Revenue Optimization\main_bridge.py", line 319, in execute_from_excel
+    sheet_input.range("A463").value = "BESS Arbitrage Revenue ($/kW-Month)"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\main.py", line 2551, in value
+    conversion.write(data, self, self._options)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\__init__.py", line 110, in write
+    pipeline(ctx)
+    ~~~~~~~~^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\framework.py", line 79, in __call__
+    stage(*args, **kwargs)
+    ~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\standard.py", line 79, in __call__
+    self._write_value(ctx.range, ctx.value, scalar)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\conversion\standard.py", line 67, in _write_value
+    rng.raw_value = value
+    ^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\main.py", line 2113, in raw_value
+    self.impl.raw_value = data
+    ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 1209, in raw_value
+    self.xl.Value = data
+    ^^^^^^^^^^^^^
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\xlwings\_xlwindows.py", line 161, in __setattr__
+    return setattr(self._inner, key, value)
+  File "C:\Users\abhishek\AppData\Local\Programs\Python\Python313\Lib\site-packages\win32com\client\__init__.py", line 599, in __setattr__
+    self._oleobj_.Invoke(*(args + (value,) + defArgs))
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pywintypes.com_error: (-2147352567, 'Exception occurred.', (0, 'Microsoft Excel', "The cell or chart you're trying to change is on a protected sheet. To make a change, unprotect the sheet. You might be requested to enter a password.", 'xlmain11.chm', 0, -2146827284), None)

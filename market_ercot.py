@@ -7,10 +7,10 @@ from core_optimizer import BESS_Simulator_Base
 class ERCOT_Optimizer(BESS_Simulator_Base):
     def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
                  initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 reg_throughput_factor=0.15):
+                 reg_throughput_factor=0.15, is_tolling=False):
         super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
                          degradation_cost_per_mwh, mileage_factor, market_name="ERCOT",
-                         reg_throughput_factor=reg_throughput_factor)
+                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling)
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         regup = subclass_vars['regup'][t]
@@ -89,8 +89,8 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
             prob += c[t] + regdn[t] <= self.power_mw
             
             # State of Charge Reservation Constraints (Sustainability)
-            prob += soc[t] >= (ecrs[t] * dur_ecrs + (regup[t] * dur_regup + rrs[t] * dur_rrs + nspin[t] * dur_nspin)) * timestep_hours
-            prob += self.energy_mwh - soc[t] >= regdn[t] * dur_regdn * timestep_hours
+            prob += soc[t] >= (ecrs[t] * dur_ecrs + (regup[t] * dur_regup + rrs[t] * dur_rrs + nspin[t] * dur_nspin))
+            prob += self.energy_mwh - soc[t] >= regdn[t] * dur_regdn
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for ERCOT ancillary service revenues."""
@@ -131,8 +131,8 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
 
     def calculate_market_revenues(self, df_out, timestep_hours):
         """Calculates revenue columns post-optimization."""
-        df_out['REGUP_Revenue'] = df_out['REGUP_MW'] * df_out['REGUP'] * timestep_hours - df_out['REGUP_MW'] * timestep_hours * self.deg_cost * self.mileage_factor
-        df_out['REGDN_Revenue'] = df_out['REGDN_MW'] * df_out['REGDN'] * timestep_hours - df_out['REGDN_MW'] * timestep_hours * self.deg_cost * self.mileage_factor
+        df_out['REGUP_Revenue'] = df_out['REGUP_MW'] * df_out['REGUP'] * timestep_hours
+        df_out['REGDN_Revenue'] = df_out['REGDN_MW'] * df_out['REGDN'] * timestep_hours
         df_out['RRS_Revenue'] = df_out['RRS_MW'] * df_out['RRS'] * timestep_hours
         df_out['NSPIN_Revenue'] = df_out['NSPIN_MW'] * df_out['NSPIN'] * timestep_hours
         df_out['ECRS_Revenue'] = df_out['ECRS_MW'] * df_out['ECRS'] * timestep_hours
