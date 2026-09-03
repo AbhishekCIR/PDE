@@ -17,13 +17,14 @@ from data_adapters.miso_adapter import MISODataAdapter
 from data_adapters.pjm_adapter import PJMDataAdapter
 
 from forecast_engine.persistence_forecast import PersistenceForecastEngine
+from excel_dashboard_generator import export_bess_dashboard_excel
 
 # Configure the Streamlit page
 st.set_page_config(page_title="Multi-Market BESS Optimizer", page_icon="🔋", layout="wide")
 
 st.title("🔋 Battery Energy Storage System (BESS) Multi-Market Optimizer")
 st.markdown("""
-Co-optimize energy arbitrage and ancillary service awards dynamically using Mixed-Integer Linear Programming (MILP). Supports multiple operating modes, variable regulation tranches, rolling-horizon simulations, and externalized market rules.
+Co-optimize energy arbitrage and ancillary service awards dynamically using Mixed-Integer Linear Programming (MILP). Supports multiple operating modes, variable regulation tranches, rolling-horizon simulations, and audit-ready live formula Excel exports.
 """)
 
 # --- SIDEBAR CONFIGURATION ---
@@ -148,7 +149,7 @@ if selected_market == "ERCOT":
 elif selected_market == "MISO":
     required_cols_msg = "`timestamp`, `LMP`, `REG_CAP`, `REG_MIL`, `SPIN`, `SUPP`"
 elif selected_market == "PJM":
-    required_cols_msg = "`timestamp`, `LMP`, `RMCCP_A`, `RMPCP_A`, `RMCCP_D`, `RMPCP_D`, `Mileage_RegA`, `Mileage_RegD`, `Price_SYNCH`, `Price_NONSYNCH` (or `Reg_Effective_Price` / `Reg_Price`)"
+    required_cols_msg = "`timestamp`, `LMP`, `RMCCP`, `RMPCP`, `Mileage`, `Price_SYNCH`, `Price_NONSYNCH` (or `Reg_Price` / `Reg_Effective_Price`)"
 else:
     required_cols_msg = "`timestamp`, `LMP`, `Reg_Price`"
 
@@ -158,7 +159,6 @@ uploaded_file = st.file_uploader("Upload Market CSV or Excel file", type=["csv",
 
 if uploaded_file is not None:
     try:
-        # Load appropriate data adapter
         if selected_market == "ERCOT":
             adapter = ERCOTDataAdapter()
         elif selected_market == "MISO":
@@ -215,7 +215,6 @@ if st.session_state['data_df'] is not None:
     if st.button("🚀 Execute Optimization", type="primary"):
         with st.spinner("Executing MILP solver..."):
             try:
-                # 1. Initialize Optimizer with sidebar settings
                 if selected_market == "ERCOT":
                     optimizer = ERCOT_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
@@ -251,26 +250,21 @@ if st.session_state['data_df'] is not None:
                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
 
-                # Set capacity credit derating factors in config dynamically
                 optimizer.config['elcc_factor'] = elcc_factor
 
-                # 2. Inject VPP and Tolling constraints into input DataFrame
                 data_in = st.session_state['data_df'].copy()
                 
-                # Apply Tolling constraint: charging prices set to 0 (pass-through charging)
                 if selected_mode == "Tolling Agreement":
                     data_in['Charge_LMP'] = 0.0
                 else:
                     data_in['Charge_LMP'] = data_in['LMP']
                 
-                # Apply VPP capacity constraint: reduce power capacity in reserved HE block
                 data_in['CAP_LIMIT'] = power_mw
                 if selected_mode == "Merchant + VPP":
                     hours = data_in['timestamp'].dt.hour
                     vpp_mask = (hours >= vpp_start_h) & (hours <= vpp_end_h)
                     data_in.loc[vpp_mask, 'CAP_LIMIT'] = max(0.0, power_mw - vpp_reserve_mw)
 
-                # 3. Handle Forecast Engine setup for Rolling Horizon
                 forecaster = None
                 if selected_sim_mode == "Rolling Horizon (Forecast-Driven)":
                     forecaster = PersistenceForecastEngine(
@@ -279,12 +273,10 @@ if st.session_state['data_df'] is not None:
                         mape=forecast_mape
                     )
 
-                # 4. Progress bar callback setup
                 progress_bar = st.progress(0, text="Solving LP bounds...")
                 def update_progress(current, total):
                     progress_bar.progress((current + 1) / total, text=f"Solving Optimization: step {current+1} of {total}")
 
-                # 5. Solve optimization
                 df_opt = optimizer.run_optimization_dispatch(
                     df=data_in,
                     progress_callback=update_progress,
@@ -298,12 +290,10 @@ if st.session_state['data_df'] is not None:
                 # --- SUMMARY REPORT METRICS ---
                 metrics, utilization = optimizer.calculate_summary_metrics(df_opt)
                 
-                # If Capacity Revenue is disabled in business model, zero it out and recalculate
                 if selected_mode in ["Merchant Only", "Tolling Agreement"]:
                     metrics['Total Net Merchant Revenue ($)'] -= metrics.get('Static Capacity Revenue ($)', 0.0)
                     metrics['Static Capacity Revenue ($)'] = 0.0
                     df_opt['Capacity_Revenue'] = 0.0
-                    # Recalculate net hourly revenues
                     df_opt['revenue'] = df_opt['Energy_Revenue'] + df_opt['Ancillary_Revenue'] - df_opt['Total_Degradation_Cost']
                 
                 st.subheader("📊 Operational & Financial Dashboard")
@@ -321,7 +311,7 @@ if st.session_state['data_df'] is not None:
                 c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
                 c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
 
-                # Tranche Breakdown Metrics (if PJM Tranches Active)
+                # Tranche Breakdown Metrics
                 if selected_market == "PJM" and enable_pjm_tranches and pjm_user_tranches:
                     st.markdown("---")
                     st.subheader("📈 PJM Regulation Tranche Breakdown")
@@ -332,37 +322,31 @@ if st.session_state['data_df'] is not None:
                         tot_rev = metrics.get(f"Total {t_name} Revenue ($)", 0.0)
                         with tranche_cols_ui[idx]:
                             st.metric(
-                                label=f"{t_name} ({tr['mw']} MW max @ ${tr['hurdle_rate']}/MW)",
+                                label=f"{t_name} ({tr['mw']} MW @ ${tr['hurdle_rate']}/MW)",
                                 value=f"${tot_rev:,.2f}",
                                 delta=f"Avg Cleared: {avg_cleared:.1f} MW"
                             )
 
-                # State of charge and dispatch tracking chart
+                # Charts
                 st.markdown("---")
                 st.subheader("🔋 State of Charge and Prices (HE 1-168 Preview)")
                 preview_len = min(168, len(df_opt))
                 chart_df = df_opt.head(preview_len).copy()
                 
-                # Dynamic Altair Chart
                 base_chart = altair.Chart(chart_df).encode(x='timestamp:T')
-                
                 soc_line = base_chart.mark_line(color='#38BDF8', strokeWidth=3).encode(
                     y=altair.Y('soc_mwh:Q', title='State of Charge (MWh)')
                 )
-                
                 price_line = base_chart.mark_line(color='#F43F5E', strokeWidth=1, strokeDash=[4,4]).encode(
                     y=altair.Y('LMP:Q', title='LMP Price ($/MWh)')
                 )
-                
                 dual_chart = altair.layer(soc_line, price_line).resolve_scale(y='independent').properties(height=380)
                 st.altair_chart(dual_chart, use_container_width=True)
 
-                # Stacked Dispatch Chart
                 st.subheader("⚡ Hourly Power Dispatch Profile (HE 1-72 Preview)")
                 disp_preview = df_opt.head(min(72, len(df_opt))).copy()
                 disp_preview['Hour_Label'] = disp_preview['timestamp'].dt.strftime('%m/%d %H:00')
                 
-                # Identify active dispatch columns
                 active_disp_cols = ['charge_mw', 'discharge_mw']
                 if selected_market == "PJM" and enable_pjm_tranches and pjm_user_tranches:
                     for tr in pjm_user_tranches:
@@ -391,76 +375,28 @@ if st.session_state['data_df'] is not None:
                 ).properties(height=380)
                 st.altair_chart(dispatch_bar_chart, use_container_width=True)
 
-                # Dispatch Action Breakdown Table
                 st.subheader("📋 Detailed Dispatch Results Preview")
                 st.dataframe(df_opt.head(72), use_container_width=True)
 
-                # Excel Spreadsheet Export Build
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                    df_opt.to_excel(writer, index=False, sheet_name='8760_Dispatch_Results')
-                    
-                    workbook = writer.book
-                    worksheet = writer.sheets['8760_Dispatch_Results']
-                    
-                    # Formatting
-                    header_format = workbook.add_format({
-                        'bold': True,
-                        'border': 1,
-                        'bg_color': '#1E293B',
-                        'font_color': 'white',
-                        'align': 'center'
-                    })
-                    date_format = workbook.add_format({'num_format': 'yyyy-mm-dd hh:mm', 'border': 1})
-                    num_format = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
-                    
-                    for col_num, value in enumerate(df_opt.columns.values):
-                        worksheet.write(0, col_num, value, header_format)
-                        
-                    worksheet.set_column('A:A', 20, date_format)
-                    worksheet.set_column('B:AZ', 15, num_format)
-                    
-                    # Create custom Summary sheet
-                    ws_summary = workbook.add_worksheet('Summary')
-                    ws_summary.set_column('A:A', 38)
-                    ws_summary.set_column('B:B', 22)
-                    
-                    sum_header_fmt = workbook.add_format({
-                        'bold': True,
-                        'font_color': 'white',
-                        'bg_color': '#0284C7',
-                        'border': 1
-                    })
-                    sum_data_fmt = workbook.add_format({
-                        'bg_color': '#FFFFE0', # light yellow
-                        'num_format': '#,##0.00',
-                        'border': 1
-                    })
-                    
-                    ws_summary.write('A1', 'KPI Metric', sum_header_fmt)
-                    ws_summary.write('B1', 'Value', sum_header_fmt)
-                    
-                    for idx, (label, val) in enumerate(metrics.items(), start=1):
-                        ws_summary.write(idx, 0, label, workbook.add_format({'border':1}))
-                        ws_summary.write(idx, 1, val, sum_data_fmt)
-
-                    # If PJM Tranches were used, write Tranche Settings sheet
-                    if selected_market == "PJM" and enable_pjm_tranches and pjm_user_tranches:
-                        ws_tr = workbook.add_worksheet('Tranche_Settings')
-                        ws_tr.set_column('A:C', 25)
-                        tr_header_fmt = workbook.add_format({'bold': True, 'font_color': 'white', 'bg_color': '#10B981', 'border': 1})
-                        ws_tr.write('A1', 'Tranche Name', tr_header_fmt)
-                        ws_tr.write('B1', 'Capacity (MW)', tr_header_fmt)
-                        ws_tr.write('C1', 'Hurdle Rate ($/MW)', tr_header_fmt)
-                        for t_i, tr_item in enumerate(pjm_user_tranches, start=1):
-                            ws_tr.write(t_i, 0, tr_item['name'], workbook.add_format({'border': 1}))
-                            ws_tr.write(t_i, 1, tr_item['mw'], workbook.add_format({'border': 1, 'num_format': '#,##0.00'}))
-                            ws_tr.write(t_i, 2, tr_item['hurdle_rate'], workbook.add_format({'border': 1, 'num_format': '$#,##0.00'}))
+                # Build Audit-Ready Formula-Linked Excel Workbook with Dashboard Tab
+                excel_bytes = export_bess_dashboard_excel(
+                    df_results=df_opt,
+                    metrics=metrics,
+                    power_mw=power_mw,
+                    duration_hr=duration_hr,
+                    rte=rte,
+                    capacity_price_mw_day=capacity_price_mw_day,
+                    elcc_factor=elcc_factor,
+                    deg_cost=deg_cost,
+                    mileage_factor=mileage_factor,
+                    tranches=pjm_user_tranches if (selected_market == "PJM" and enable_pjm_tranches) else None,
+                    market_name=selected_market
+                )
                         
                 st.download_button(
-                    label="💾 Download Finalized Results (.xlsx)",
-                    data=excel_buffer.getvalue(),
-                    file_name=f"BESS_Optimized_Results_{selected_market}.xlsx",
+                    label="💾 Download Formula-Linked Results & Dashboard (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"BESS_Optimized_Dashboard_{selected_market}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
                 
