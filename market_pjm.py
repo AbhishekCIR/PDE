@@ -6,14 +6,6 @@ from core_optimizer import BESS_Simulator_Base
 from typing import List, Dict, Optional
 
 class PJM_Optimizer(BESS_Simulator_Base):
-<<<<<<< Updated upstream
-    def __init__(self, power_mw=100.0, duration_hr=4.0, rte=0.90, max_cycles_per_day=1.0, 
-                 initial_soc_pct=0.5, degradation_cost_per_mwh=5.0, mileage_factor=0.10,
-                 capacity_price_mw_day=120.0, reg_throughput_factor=0.15, is_tolling=False):
-        super().__init__(power_mw, duration_hr, rte, max_cycles_per_day, initial_soc_pct, 
-                         degradation_cost_per_mwh, mileage_factor, market_name="PJM",
-                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling)
-=======
     """
     PJM Market Optimizer for BESS assets.
     Supports both:
@@ -31,6 +23,7 @@ class PJM_Optimizer(BESS_Simulator_Base):
         mileage_factor: float = 0.10,
         capacity_price_mw_day: float = 120.0, 
         reg_throughput_factor: float = 0.15,
+        is_tolling: bool = False,
         enable_tranches: bool = True,
         tranches: Optional[List[Dict]] = None,
         elcc_factor: float = 0.50
@@ -44,9 +37,9 @@ class PJM_Optimizer(BESS_Simulator_Base):
             degradation_cost_per_mwh=degradation_cost_per_mwh, 
             mileage_factor=mileage_factor, 
             market_name="PJM",
-            reg_throughput_factor=reg_throughput_factor
+            reg_throughput_factor=reg_throughput_factor,
+            is_tolling=is_tolling
         )
->>>>>>> Stashed changes
         
         self.capacity_price_mw_day = capacity_price_mw_day
         self.elcc_factor = elcc_factor
@@ -64,26 +57,6 @@ class PJM_Optimizer(BESS_Simulator_Base):
             self.tranches = tranches or []
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
-<<<<<<< Updated upstream
-        regA = subclass_vars['regA'][t]
-        regD = subclass_vars['regD'][t]
-        regA_val = regA.varValue if is_value else regA
-        regD_val = regD.varValue if is_value else regD
-        if regA_val is None: regA_val = 0.0
-        if regD_val is None: regD_val = 0.0
-
-        # Get dynamic mileages
-        mileage_a = self.current_df['Mileage_RegA'].iloc[t] if hasattr(self, 'current_df') and 'Mileage_RegA' in self.current_df.columns else 1.2
-        mileage_d = self.current_df['Mileage_RegD'].iloc[t] if hasattr(self, 'current_df') and 'Mileage_RegD' in self.current_df.columns else 3.5
-        
-        throughput_a = regA_val * mileage_a * self.reg_throughput_factor * 0.5
-        throughput_d = regD_val * mileage_d * self.reg_throughput_factor * 0.5
-        
-        # PJM dual regulation (RegA + RegD) RTE loss depletion
-        return (throughput_a + throughput_d) * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
-
-    def generate_sample_data(self, days=365, freq='1h', random_seed=None):
-=======
         """Calculates SOC depletion from regulation AGC round-trip losses."""
         if self.enable_tranches and self.tranches:
             tot_reg = 0.0
@@ -103,10 +76,7 @@ class PJM_Optimizer(BESS_Simulator_Base):
             return (regA_val + regD_val) * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
     def generate_sample_data(self, days: int = 365, freq: str = '1h') -> pd.DataFrame:
->>>>>>> Stashed changes
         """Generates synthetic PJM prices for 1 year."""
-        if random_seed is not None:
-            np.random.seed(random_seed)
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
@@ -212,11 +182,6 @@ class PJM_Optimizer(BESS_Simulator_Base):
             tranche_vars = subclass_vars['tranche_vars']
             eff_reg_prices = self._get_effective_reg_price(df_prices)
             
-<<<<<<< Updated upstream
-            # State of Charge Reservation Constraints (Sustainability)
-            prob += soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch)
-            prob += self.energy_mwh - soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd)
-=======
             for t in range(T_day):
                 tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
                 
@@ -244,7 +209,6 @@ class PJM_Optimizer(BESS_Simulator_Base):
                 prob += c[t] + regA[t] + regD[t] <= self.power_mw
                 prob += soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
                 prob += self.energy_mwh - soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd) * timestep_hours
->>>>>>> Stashed changes
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for PJM ancillary services."""
@@ -330,12 +294,6 @@ class PJM_Optimizer(BESS_Simulator_Base):
         perf_d = self.config.get("default_performance_score", {}).get("RegD", 0.95)
         eff_reg_p = self._get_effective_reg_price(df_out)
         
-<<<<<<< Updated upstream
-        df_out['RegA_Revenue'] = df_out['RegA_MW'] * (df_out['RMCCP_A'] * perf_a + df_out['RMPCP_A'] * df_out['Mileage_RegA'] * perf_a) * timestep_hours
-        df_out['RegD_Revenue'] = df_out['RegD_MW'] * (df_out['RMCCP_D'] * perf_d + df_out['RMPCP_D'] * df_out['Mileage_RegD'] * perf_d) * timestep_hours
-        df_out['SYNCH_Revenue'] = df_out['SYNCH_MW'] * df_out['Price_SYNCH'] * timestep_hours
-        df_out['NONSYNCH_Revenue'] = df_out['NONSYNCH_MW'] * df_out['Price_NONSYNCH'] * timestep_hours
-=======
         if self.enable_tranches and self.tranches:
             tot_reg_rev = np.zeros(len(df_out))
             tot_reg_deg = np.zeros(len(df_out))
@@ -368,7 +326,6 @@ class PJM_Optimizer(BESS_Simulator_Base):
             df_out['Regulation_Revenue'] = df_out['RegA_Revenue'] + df_out['RegD_Revenue']
             df_out['Ancillary_Revenue'] = df_out['Regulation_Revenue'] + df_out['SYNCH_Revenue'] + df_out['NONSYNCH_Revenue']
             df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + (df_out['RegA_MW'] * Mileage_RegA + df_out['RegD_MW'] * Mileage_RegD) * timestep_hours * self.deg_cost * self.mileage_factor
->>>>>>> Stashed changes
         
         # Capacity Revenue
         elcc = self.config.get("elcc_factor", self.elcc_factor)
@@ -401,27 +358,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         # Operational KPIs
         total_discharge_mwh = (df_out['discharge_mw'] * timestep_hours).sum()
         total_charge_mwh = (df_out['charge_mw'] * timestep_hours).sum()
-<<<<<<< Updated upstream
-        
-        mileage_a = df_out['Mileage_RegA'] if 'Mileage_RegA' in df_out.columns else 1.2
-        mileage_d = df_out['Mileage_RegD'] if 'Mileage_RegD' in df_out.columns else 3.5
-        
-        agc_throughput_a = df_out['RegA_MW'] * mileage_a * self.reg_throughput_factor * 0.5
-        agc_throughput_d = df_out['RegD_MW'] * mileage_d * self.reg_throughput_factor * 0.5
-        total_agc_discharge_mwh = ((agc_throughput_a + agc_throughput_d) * timestep_hours).sum()
-        total_agc_charge_mwh = total_agc_discharge_mwh
-        
-        arb_efc = total_discharge_mwh / self.energy_mwh
-        agc_efc = total_agc_discharge_mwh / self.energy_mwh
-        total_efc = arb_efc + agc_efc
-        
-        arb_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
-        physical_rte = ((total_discharge_mwh + total_agc_discharge_mwh) / 
-                        (total_charge_mwh + total_agc_charge_mwh)) if (total_charge_mwh + total_agc_charge_mwh) > 0 else 0.0
-=======
         efc = total_discharge_mwh / self.energy_mwh if self.energy_mwh > 0 else 0.0
         achieved_rte = (total_discharge_mwh / total_charge_mwh) if total_charge_mwh > 0 else 0.0
->>>>>>> Stashed changes
         
         as_sum = df_out['Total_Reg_MW'] + df_out['SYNCH_MW'] + df_out['NONSYNCH_MW']
         as_fraction = (as_sum > 1e-3).mean()
@@ -440,18 +378,10 @@ class PJM_Optimizer(BESS_Simulator_Base):
             'Static Capacity Revenue ($)': capacity_rev,
             'Degradation Expense ($)': deg_expense,
             'Reported Lost Opportunity Cost ($)': loc_sum,
-            'Equivalent Full Cycles (EFC)': arb_efc, # Backward compatibility
-            'Arbitrage EFC': arb_efc,
-            'AGC EFC': agc_efc,
-            'Total EFC': total_efc,
-            'Achieved Round-Trip Efficiency': arb_rte, # Backward compatibility
-            'Arbitrage Round-Trip Efficiency': arb_rte,
-            'Physical Round-Trip Efficiency': physical_rte,
+            'Equivalent Full Cycles (EFC)': efc,
+            'Achieved Round-Trip Efficiency': achieved_rte,
             'Charging Energy (MWh)': total_charge_mwh,
             'Discharging Energy (MWh)': total_discharge_mwh,
-            'AGC Charge Throughput (MWh)': total_agc_charge_mwh,
-            'AGC Discharge Throughput (MWh)': total_agc_discharge_mwh,
-            'Total AGC Throughput (MWh)': total_agc_charge_mwh + total_agc_discharge_mwh,
             'Ancillary Participation Fraction': as_fraction
         }
 
