@@ -155,32 +155,64 @@ else:
 
 st.info(f"Required columns (case-insensitive): {required_cols_msg}")
 
-if selected_market == "PJM":
-    st.caption("💡 **Need a template?** Download pre-formatted PJM input files with realistic pricing curves and formulas:")
-    tmpl_col1, tmpl_col2 = st.columns([1, 1])
+@st.cache_data
+def get_pjm_template_bytes():
+    """Returns (xlsx_bytes, csv_bytes) for PJM input template, with in-memory fallback."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     tmpl_xlsx = os.path.join(base_dir, "PJM_Market_Template.xlsx")
     tmpl_csv = os.path.join(base_dir, "PJM_Market_Template.csv")
-    with tmpl_col1:
-        if os.path.exists(tmpl_xlsx):
+    
+    xlsx_bytes, csv_bytes = None, None
+    if os.path.exists(tmpl_xlsx):
+        try:
             with open(tmpl_xlsx, "rb") as f:
-                st.download_button(
-                    label="📥 Download PJM Template (.xlsx)",
-                    data=f.read(),
-                    file_name="PJM_Market_Template.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-    with tmpl_col2:
-        if os.path.exists(tmpl_csv):
+                xlsx_bytes = f.read()
+        except Exception:
+            pass
+            
+    if os.path.exists(tmpl_csv):
+        try:
             with open(tmpl_csv, "rb") as f:
-                st.download_button(
-                    label="📥 Download PJM Template (.csv)",
-                    data=f.read(),
-                    file_name="PJM_Market_Template.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+                csv_bytes = f.read()
+        except Exception:
+            pass
+            
+    if xlsx_bytes is None or csv_bytes is None:
+        pjm_opt = PJM_Optimizer()
+        df_sample = pjm_opt.generate_sample_data(days=7)
+        df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        if csv_bytes is None:
+            csv_bytes = df_sample.to_csv(index=False).encode('utf-8')
+            
+        if xlsx_bytes is None:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                df_sample.to_excel(writer, sheet_name='Hourly_Market_Data', index=False)
+            xlsx_bytes = buf.getvalue()
+            
+    return xlsx_bytes, csv_bytes
+
+if selected_market == "PJM":
+    st.caption("💡 **Need a template?** Download pre-formatted PJM input files with realistic pricing curves and formulas:")
+    tmpl_col1, tmpl_col2 = st.columns([1, 1])
+    xlsx_data, csv_data = get_pjm_template_bytes()
+    with tmpl_col1:
+        st.download_button(
+            label="📥 Download PJM Template (.xlsx)",
+            data=xlsx_data,
+            file_name="PJM_Market_Template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    with tmpl_col2:
+        st.download_button(
+            label="📥 Download PJM Template (.csv)",
+            data=csv_data,
+            file_name="PJM_Market_Template.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
 
 uploaded_file = st.file_uploader("Upload Market CSV or Excel file", type=["csv", "xlsx"])
 
