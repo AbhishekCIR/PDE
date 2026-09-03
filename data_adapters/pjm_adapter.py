@@ -5,10 +5,8 @@ import numpy as np
 
 class PJMDataAdapter(BaseDataAdapter):
     """
-    Standardized Data Adapter for PJM Market Data.
-    Supports both:
-      1. Modern Unified PJM Regulation format (RMCCP, RMPCP, Mileage / Reg_Price)
-      2. Legacy dual-signal format (RMCCP_D, RMPCP_D, Mileage_RegD / RMCCP_A, RMPCP_A)
+    Standardized Data Adapter for Unified PJM Market Data.
+    Requires strictly unified PJM columns: LMP, RMCCP, RMPCP, Mileage, Price_SYNCH, Price_NONSYNCH
     """
     def __init__(self):
         expected_cols = [
@@ -16,9 +14,9 @@ class PJMDataAdapter(BaseDataAdapter):
         ]
         column_mapping = {
             'LMP': ['LMP', 'lmp', 'settlementpointprice', 'energy_price', 'price', 'da_lmp', 'rt_lmp'],
-            'RMCCP': ['RMCCP', 'rmccp', 'rmccp_d', 'rmccp d', 'reg_capability_price', 'capability price', 'reg capability price', 'RMCCP_A', 'rmccp_a'],
-            'RMPCP': ['RMPCP', 'rmpcp', 'rmpcp_d', 'rmpcp d', 'reg_performance_price', 'performance price', 'reg performance price', 'RMPCP_A', 'rmpcp_a'],
-            'Mileage': ['Mileage', 'mileage', 'mileage_regd', 'regd mileage', 'mileage d', 'mileageratio_regd', 'mileage ratio', 'Mileage_RegA', 'mileage_rega'],
+            'RMCCP': ['RMCCP', 'rmccp', 'reg_capability_price', 'capability price', 'reg capability price', 'capability_price', 'RMCCP_D', 'rmccp_d'],
+            'RMPCP': ['RMPCP', 'rmpcp', 'reg_performance_price', 'performance price', 'reg performance price', 'performance_price', 'RMPCP_D', 'rmpcp_d'],
+            'Mileage': ['Mileage', 'mileage', 'mileageratio', 'mileage ratio', 'reg_mileage', 'Mileage_RegD', 'mileage_regd'],
             'Price_SYNCH': ['Price_SYNCH', 'price_synch', 'synch', 'synchronized reserve price', 'synch price', 'spin_price', 'srs'],
             'Price_NONSYNCH': ['Price_NONSYNCH', 'price_nonsynch', 'nonsynch', 'non-synchronized reserve price', 'non-synch price', 'nsrs'],
             'Reg_Effective_Price': ['Reg_Effective_Price', 'reg_effective_price', 'reg_price', 'Reg_Price', 'regulation_price', 'effective_reg_price']
@@ -26,7 +24,7 @@ class PJMDataAdapter(BaseDataAdapter):
         super().__init__('PJM', expected_cols, column_mapping)
 
     def process(self, file_path_or_buffer):
-        """Processes and standardizes PJM telemetry data, computing effective regulation price if needed."""
+        """Processes and standardizes unified PJM telemetry data."""
         df_clean, logs = super().process(file_path_or_buffer)
         
         # Fill missing values with reasonable defaults
@@ -59,9 +57,4 @@ class PJMDataAdapter(BaseDataAdapter):
             df_clean['Reg_Effective_Price'] = (df_clean['RMCCP'] * perf_score) + (df_clean['RMPCP'] * df_clean['Mileage'] * perf_score)
             logs.append("Computed unified 'Reg_Effective_Price' = (RMCCP * 0.95) + (RMPCP * Mileage * 0.95)")
             
-        # Add legacy alias columns for backwards compatibility
-        df_clean['RMCCP_D'] = df_clean['RMCCP']
-        df_clean['RMPCP_D'] = df_clean['RMPCP']
-        df_clean['Mileage_RegD'] = df_clean['Mileage']
-        
         return df_clean, logs

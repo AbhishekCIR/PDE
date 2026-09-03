@@ -8,9 +8,7 @@ from typing import List, Dict, Optional
 class PJM_Optimizer(BESS_Simulator_Base):
     """
     PJM Market Optimizer for BESS assets.
-    Supports both:
-      1. Dynamic Variable Tranche Bidding (for large storage assets e.g. 250 MW Raccoon Island)
-      2. Classic Dual Regulation (RegA / RegD) and Synchronized/Non-Synchronized Operating Reserves
+    Implements unified PJM regulation pricing (RMCCP, RMPCP, Mileage) and variable tranche bidding.
     """
     def __init__(
         self, 
@@ -47,36 +45,28 @@ class PJM_Optimizer(BESS_Simulator_Base):
         
         # Configure variable regulation tranches
         if tranches is None and enable_tranches:
-            # Smart default 3-tranche segmentation calibrated to power_mw
             self.tranches = [
                 {"name": "Tranche 1 (Base)", "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 0.0},
                 {"name": "Tranche 2 (Mid)",  "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 30.0},
                 {"name": "Tranche 3 (Peak)", "mw": min(25.0, power_mw * 0.15), "hurdle_rate": 60.0}
             ]
+        elif tranches is not None:
+            self.tranches = tranches
         else:
-            self.tranches = tranches or []
+            self.tranches = [{"name": "Regulation", "mw": power_mw, "hurdle_rate": 0.0}]
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         """Calculates SOC depletion from regulation AGC round-trip losses."""
-        if self.enable_tranches and self.tranches:
-            tot_reg = 0.0
-            for i in range(len(self.tranches)):
-                v = subclass_vars['tranche_vars'][i][t]
-                val = v.varValue if is_value else v
-                if val is not None:
-                    tot_reg += val
-            return tot_reg * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
-        else:
-            regA = subclass_vars.get('regA', {}).get(t, 0.0)
-            regD = subclass_vars.get('regD', {}).get(t, 0.0)
-            regA_val = regA.varValue if (is_value and hasattr(regA, 'varValue')) else (regA if not hasattr(regA, 'varValue') else 0.0)
-            regD_val = regD.varValue if (is_value and hasattr(regD, 'varValue')) else (regD if not hasattr(regD, 'varValue') else 0.0)
-            if regA_val is None: regA_val = 0.0
-            if regD_val is None: regD_val = 0.0
-            return (regA_val + regD_val) * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
+        tot_reg = 0.0
+        for i in range(len(self.tranches)):
+            v = subclass_vars['tranche_vars'][i][t]
+            val = v.varValue if is_value else v
+            if val is not None:
+                tot_reg += val
+        return tot_reg * self.reg_throughput_factor * (self.eff_c - 1.0 / self.eff_d) * timestep_hours
 
     def generate_sample_data(self, days: int = 365, freq: str = '1h') -> pd.DataFrame:
-        """Generates synthetic PJM prices for 1 year."""
+        """Generates unified synthetic PJM prices (RMCCP, RMPCP, Mileage, SYNCH, NONSYNCH)."""
         timestamps = pd.date_range(start="2026-01-01", periods=days * 24, freq=freq)
         df = pd.DataFrame({'timestamp': timestamps})
         
@@ -91,25 +81,21 @@ class PJM_Optimizer(BESS_Simulator_Base):
         noise = np.random.normal(0, 5, len(df))
         df['LMP'] = np.clip(base_lmp + noise, -15.0, None)
         
-        # Add random price spikes
+        # Price spikes
         spike_indices = np.random.choice(df.index, size=int(len(df)*0.035), replace=False)
         df.loc[spike_indices, 'LMP'] += np.random.uniform(60, 260, size=len(spike_indices))
         
-        # PJM synthetic ancillary services (Capability and Performance prices)
-        df['RMCCP_A'] = np.random.lognormal(mean=1.2, sigma=0.4, size=len(df))
-        df['RMPCP_A'] = np.random.lognormal(mean=0.5, sigma=0.3, size=len(df))
+        # Unified Regulation Capability Price (RMCCP) & Performance Price (RMPCP)
+        df['RMCCP'] = 22.0 + 26.0 * np.sin((hours - 7) * np.pi / 12)**2 * seasonal_mult + np.random.normal(0, 4, len(df))
+        df['RMCCP'] = np.clip(df['RMCCP'], 4.0, None)
+        df.loc[spike_indices, 'RMCCP'] += np.random.uniform(40, 140, size=len(spike_indices))
+        df['RMPCP'] = np.random.uniform(1.5, 4.5, len(df))
         
-        # Fast regulation RegD
-        df['RMCCP_D'] = 22.0 + 26.0 * np.sin((hours - 7) * np.pi / 12)**2 * seasonal_mult + np.random.normal(0, 4, len(df))
-        df['RMCCP_D'] = np.clip(df['RMCCP_D'], 4.0, None)
-        df.loc[spike_indices, 'RMCCP_D'] += np.random.uniform(40, 140, size=len(spike_indices))
-        df['RMPCP_D'] = np.random.uniform(1.5, 4.5, len(df))
+        # Fast storage mileage ratio
+        df['Mileage'] = np.clip(np.random.normal(3.2, 0.3, len(df)), 1.5, None)
         
-        # Mileage ratios
-        mileage_a = self.config.get("default_mileage", {}).get("RegA", 1.2)
-        mileage_d = self.config.get("default_mileage", {}).get("RegD", 3.2)
-        df['Mileage_RegA'] = np.clip(np.random.normal(mileage_a, 0.1, len(df)), 0.5, None)
-        df['Mileage_RegD'] = np.clip(np.random.normal(mileage_d, 0.3, len(df)), 1.5, None)
+        # Unified Effective Regulation Price = RMCCP * 0.95 + RMPCP * Mileage * 0.95
+        df['Reg_Effective_Price'] = (df['RMCCP'] * 0.95) + (df['RMPCP'] * df['Mileage'] * 0.95)
         
         # Reserves
         df['Price_SYNCH'] = np.clip(np.random.lognormal(mean=1.2, sigma=0.5, size=len(df)), 2.0, 35.0)
@@ -118,140 +104,86 @@ class PJM_Optimizer(BESS_Simulator_Base):
         return df
 
     def _get_effective_reg_price(self, df_prices: pd.DataFrame) -> np.ndarray:
-        """Calculates total effective regulation price per MWh from capability + performance."""
-        perf_d = self.config.get("default_performance_score", {}).get("RegD", 0.95)
+        """Calculates total effective regulation price per MWh from unified capability + performance."""
+        perf_score = self.config.get("default_performance_score", {}).get("Reg", 0.95)
         
-        if 'RMCCP_D' in df_prices.columns and 'RMPCP_D' in df_prices.columns:
-            mileage = df_prices['Mileage_RegD'].values if 'Mileage_RegD' in df_prices.columns else np.full(len(df_prices), 3.2)
-            return (df_prices['RMCCP_D'].values * perf_d) + (df_prices['RMPCP_D'].values * mileage * perf_d)
-        elif 'Reg_Effective_Price' in df_prices.columns:
+        if 'Reg_Effective_Price' in df_prices.columns:
             return df_prices['Reg_Effective_Price'].values
         elif 'Reg_Price' in df_prices.columns:
             return df_prices['Reg_Price'].values
-        elif 'RMCCP_A' in df_prices.columns:
-            mileage_a = df_prices['Mileage_RegA'].values if 'Mileage_RegA' in df_prices.columns else np.full(len(df_prices), 1.2)
-            return (df_prices['RMCCP_A'].values * 0.90) + (df_prices['RMPCP_A'].values * mileage_a * 0.90)
+        elif 'RMCCP' in df_prices.columns and 'RMPCP' in df_prices.columns:
+            mileage = df_prices['Mileage'].values if 'Mileage' in df_prices.columns else np.full(len(df_prices), 3.2)
+            return (df_prices['RMCCP'].values * perf_score) + (df_prices['RMPCP'].values * mileage * perf_score)
+        elif 'RMCCP_D' in df_prices.columns:
+            mileage_d = df_prices['Mileage_RegD'].values if 'Mileage_RegD' in df_prices.columns else np.full(len(df_prices), 3.2)
+            rmpcp_d = df_prices['RMPCP_D'].values if 'RMPCP_D' in df_prices.columns else np.full(len(df_prices), 2.5)
+            return (df_prices['RMCCP_D'].values * perf_score) + (rmpcp_d * mileage_d * perf_score)
         else:
-            return np.zeros(len(df_prices))
+            return np.full(len(df_prices), 30.0)
 
     def define_market_variables(self, prob, T_day):
         """Defines PJM specific LpVariables for tranches and reserves."""
         synch = pulp.LpVariable.dicts("SYNCH", range(T_day), lowBound=0, upBound=self.power_mw)
         nonsynch = pulp.LpVariable.dicts("NONSYNCH", range(T_day), lowBound=0, upBound=self.power_mw)
         
-        if self.enable_tranches and self.tranches:
-            tranche_vars = []
-            for i, tr in enumerate(self.tranches):
-                mw_cap = float(tr.get('mw', 0.0))
-                v = pulp.LpVariable.dicts(f"Reg_Tranche_{i}", range(T_day), lowBound=0, upBound=mw_cap)
-                tranche_vars.append(v)
-            
-            return {
-                'tranche_vars': tranche_vars,
-                'synch': synch,
-                'nonsynch': nonsynch
-            }
-        else:
-            # Classic RegA / RegD Mode
-            regA = pulp.LpVariable.dicts("RegA", range(T_day), lowBound=0, upBound=self.power_mw)
-            regD = pulp.LpVariable.dicts("RegD", range(T_day), lowBound=0, upBound=self.power_mw)
-            u_regA = pulp.LpVariable.dicts("u_regA", range(T_day), cat='Binary')
-            u_regD = pulp.LpVariable.dicts("u_regD", range(T_day), cat='Binary')
-            
-            for t in range(T_day):
-                prob += regA[t] <= self.power_mw * u_regA[t]
-                prob += regD[t] <= self.power_mw * u_regD[t]
-                prob += u_regA[t] + u_regD[t] <= 1
-                
-            return {
-                'regA': regA,
-                'regD': regD,
-                'synch': synch,
-                'nonsynch': nonsynch
-            }
+        tranche_vars = []
+        for i, tr in enumerate(self.tranches):
+            mw_cap = float(tr.get('mw', 0.0))
+            v = pulp.LpVariable.dicts(f"Reg_Tranche_{i}", range(T_day), lowBound=0, upBound=mw_cap)
+            tranche_vars.append(v)
+        
+        return {
+            'tranche_vars': tranche_vars,
+            'synch': synch,
+            'nonsynch': nonsynch
+        }
 
     def add_market_constraints(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Adds PJM power capacity, hurdle rates, and reserve SOC buffer constraints."""
         synch = subclass_vars['synch']
         nonsynch = subclass_vars['nonsynch']
+        tranche_vars = subclass_vars['tranche_vars']
         
         dur_synch = self.config.get("reserve_durations", {}).get("SYNCH", 0.50)
         dur_nonsynch = self.config.get("reserve_durations", {}).get("NONSYNCH", 0.50)
-
-        if self.enable_tranches and self.tranches:
-            tranche_vars = subclass_vars['tranche_vars']
-            eff_reg_prices = self._get_effective_reg_price(df_prices)
+        eff_reg_prices = self._get_effective_reg_price(df_prices)
+        
+        for t in range(T_day):
+            tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
             
-            for t in range(T_day):
-                tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
-                
-                # Inverter Power Limits
-                prob += d[t] + tot_reg_expr + synch[t] + nonsynch[t] <= self.power_mw
-                prob += c[t] + tot_reg_expr <= self.power_mw
-                
-                # SOC Continuous Headroom Buffer for PJM Regulation (30-min buffer)
-                prob += soc[t] >= (0.10 * self.energy_mwh) + (tot_reg_expr * 0.50 + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
-                prob += soc[t] <= (0.90 * self.energy_mwh) - (tot_reg_expr * 0.50) * timestep_hours
-                
-                # Hurdle Rate Enforcement for Each User Tranche
-                for i, tr in enumerate(self.tranches):
-                    hurdle = float(tr.get('hurdle_rate', 0.0))
-                    if eff_reg_prices[t] < hurdle:
-                        prob += tranche_vars[i][t] == 0
-        else:
-            regA = subclass_vars['regA']
-            regD = subclass_vars['regD']
-            dur_rega = self.config.get("reserve_durations", {}).get("RegA", 1.0)
-            dur_regd = self.config.get("reserve_durations", {}).get("RegD", 0.5)
-
-            for t in range(T_day):
-                prob += d[t] + regA[t] + regD[t] + synch[t] + nonsynch[t] <= self.power_mw
-                prob += c[t] + regA[t] + regD[t] <= self.power_mw
-                prob += soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
-                prob += self.energy_mwh - soc[t] >= (regA[t] * dur_rega + regD[t] * dur_regd) * timestep_hours
+            # Inverter Power Limits
+            prob += d[t] + tot_reg_expr + synch[t] + nonsynch[t] <= self.power_mw
+            prob += c[t] + tot_reg_expr <= self.power_mw
+            
+            # SOC Continuous Headroom Buffer for PJM Regulation (30-min buffer)
+            prob += soc[t] >= (0.10 * self.energy_mwh) + (tot_reg_expr * 0.50 + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
+            prob += soc[t] <= (0.90 * self.energy_mwh) - (tot_reg_expr * 0.50) * timestep_hours
+            
+            # Hurdle Rate Enforcement for Each User Tranche
+            for i, tr in enumerate(self.tranches):
+                hurdle = float(tr.get('hurdle_rate', 0.0))
+                if eff_reg_prices[t] < hurdle:
+                    prob += tranche_vars[i][t] == 0
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for PJM ancillary services."""
         synch = subclass_vars['synch']
         nonsynch = subclass_vars['nonsynch']
+        tranche_vars = subclass_vars['tranche_vars']
         
         Price_SYNCH = df_prices['Price_SYNCH'].values if 'Price_SYNCH' in df_prices.columns else np.zeros(T_day)
         Price_NONSYNCH = df_prices['Price_NONSYNCH'].values if 'Price_NONSYNCH' in df_prices.columns else np.zeros(T_day)
         
         as_rev_terms = []
         reg_deg_factor = self.deg_cost * self.mileage_factor
-
-        if self.enable_tranches and self.tranches:
-            tranche_vars = subclass_vars['tranche_vars']
-            eff_reg_prices = self._get_effective_reg_price(df_prices)
-            
-            for t in range(T_day):
-                tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
-                reg_net = (tot_reg_expr * eff_reg_prices[t] * timestep_hours) - (tot_reg_expr * reg_deg_factor * timestep_hours)
-                synch_rev = synch[t] * Price_SYNCH[t] * timestep_hours
-                nonsynch_rev = nonsynch[t] * Price_NONSYNCH[t] * timestep_hours
-                as_rev_terms.append(reg_net + synch_rev + nonsynch_rev)
-        else:
-            regA = subclass_vars['regA']
-            regD = subclass_vars['regD']
-            RMCCP_A = df_prices['RMCCP_A'].values if 'RMCCP_A' in df_prices.columns else np.zeros(T_day)
-            RMPCP_A = df_prices['RMPCP_A'].values if 'RMPCP_A' in df_prices.columns else np.zeros(T_day)
-            RMCCP_D = df_prices['RMCCP_D'].values if 'RMCCP_D' in df_prices.columns else np.zeros(T_day)
-            RMPCP_D = df_prices['RMPCP_D'].values if 'RMPCP_D' in df_prices.columns else np.zeros(T_day)
-            Mileage_RegA = df_prices['Mileage_RegA'].values if 'Mileage_RegA' in df_prices.columns else np.full(T_day, 1.2)
-            Mileage_RegD = df_prices['Mileage_RegD'].values if 'Mileage_RegD' in df_prices.columns else np.full(T_day, 3.2)
-            
-            perf_a = self.config.get("default_performance_score", {}).get("RegA", 0.90)
-            perf_d = self.config.get("default_performance_score", {}).get("RegD", 0.95)
-            
-            for t in range(T_day):
-                rega_rev = regA[t] * (RMCCP_A[t] * perf_a + RMPCP_A[t] * Mileage_RegA[t] * perf_a) * timestep_hours
-                regd_rev = regD[t] * (RMCCP_D[t] * perf_d + RMPCP_D[t] * Mileage_RegD[t] * perf_d) * timestep_hours
-                synch_rev = synch[t] * Price_SYNCH[t] * timestep_hours
-                nonsynch_rev = nonsynch[t] * Price_NONSYNCH[t] * timestep_hours
-                rega_deg = regA[t] * Mileage_RegA[t] * timestep_hours * self.deg_cost * self.mileage_factor
-                regd_deg = regD[t] * Mileage_RegD[t] * timestep_hours * self.deg_cost * self.mileage_factor
-                as_rev_terms.append(rega_rev + regd_rev + synch_rev + nonsynch_rev - (rega_deg + regd_deg))
+        eff_reg_prices = self._get_effective_reg_price(df_prices)
+        
+        for t in range(T_day):
+            tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
+            reg_net = (tot_reg_expr * eff_reg_prices[t] * timestep_hours) - (tot_reg_expr * reg_deg_factor * timestep_hours)
+            synch_rev = synch[t] * Price_SYNCH[t] * timestep_hours
+            nonsynch_rev = nonsynch[t] * Price_NONSYNCH[t] * timestep_hours
+            as_rev_terms.append(reg_net + synch_rev + nonsynch_rev)
                 
         return pulp.lpSum(as_rev_terms)
 
@@ -262,25 +194,17 @@ class PJM_Optimizer(BESS_Simulator_Base):
             'NONSYNCH_MW': [subclass_vars['nonsynch'][t].varValue or 0.0 for t in day_indices]
         }
 
-        if self.enable_tranches and self.tranches:
-            tranche_vars = subclass_vars['tranche_vars']
-            tot_reg_arr = [0.0] * len(day_indices)
-            
-            for i, tr in enumerate(self.tranches):
-                col_name = f"{tr['name']}_MW"
-                vals = [tranche_vars[i][t].varValue or 0.0 for t in day_indices]
-                res[col_name] = vals
-                for idx, v in enumerate(vals):
-                    tot_reg_arr[idx] += v
-            
-            res['Total_Reg_MW'] = tot_reg_arr
-            res['RegD_MW'] = tot_reg_arr  # Compatibility alias
-            res['RegA_MW'] = [0.0] * len(day_indices)
-        else:
-            res['RegA_MW'] = [subclass_vars['regA'][t].varValue or 0.0 for t in day_indices]
-            res['RegD_MW'] = [subclass_vars['regD'][t].varValue or 0.0 for t in day_indices]
-            res['Total_Reg_MW'] = [res['RegA_MW'][i] + res['RegD_MW'][i] for i in range(len(day_indices))]
-
+        tranche_vars = subclass_vars['tranche_vars']
+        tot_reg_arr = [0.0] * len(day_indices)
+        
+        for i, tr in enumerate(self.tranches):
+            col_name = f"{tr['name']}_MW"
+            vals = [tranche_vars[i][t].varValue or 0.0 for t in day_indices]
+            res[col_name] = vals
+            for idx, v in enumerate(vals):
+                tot_reg_arr[idx] += v
+        
+        res['Total_Reg_MW'] = tot_reg_arr
         return res
 
     def calculate_market_revenues(self, df_out, timestep_hours):
@@ -291,41 +215,22 @@ class PJM_Optimizer(BESS_Simulator_Base):
         df_out['SYNCH_Revenue'] = df_out['SYNCH_MW'] * Price_SYNCH * timestep_hours
         df_out['NONSYNCH_Revenue'] = df_out['NONSYNCH_MW'] * Price_NONSYNCH * timestep_hours
         
-        perf_d = self.config.get("default_performance_score", {}).get("RegD", 0.95)
         eff_reg_p = self._get_effective_reg_price(df_out)
+        tot_reg_rev = np.zeros(len(df_out))
+        tot_reg_deg = np.zeros(len(df_out))
         
-        if self.enable_tranches and self.tranches:
-            tot_reg_rev = np.zeros(len(df_out))
-            tot_reg_deg = np.zeros(len(df_out))
-            
-            for tr in self.tranches:
-                col = f"{tr['name']}_MW"
-                if col in df_out.columns:
-                    tr_rev = df_out[col] * eff_reg_p * timestep_hours
-                    tr_deg = df_out[col] * timestep_hours * self.deg_cost * self.mileage_factor
-                    df_out[f"{tr['name']}_Revenue"] = tr_rev - tr_deg
-                    tot_reg_rev += tr_rev
-                    tot_reg_deg += tr_deg
-            
-            df_out['Regulation_Revenue'] = tot_reg_rev - tot_reg_deg
-            df_out['RegD_Revenue'] = df_out['Regulation_Revenue']
-            df_out['RegA_Revenue'] = 0.0
-            df_out['Ancillary_Revenue'] = df_out['Regulation_Revenue'] + df_out['SYNCH_Revenue'] + df_out['NONSYNCH_Revenue']
-            df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + tot_reg_deg
-        else:
-            perf_a = self.config.get("default_performance_score", {}).get("RegA", 0.90)
-            Mileage_RegA = df_out['Mileage_RegA'] if 'Mileage_RegA' in df_out.columns else 1.2
-            Mileage_RegD = df_out['Mileage_RegD'] if 'Mileage_RegD' in df_out.columns else 3.2
-            RMCCP_A = df_out['RMCCP_A'] if 'RMCCP_A' in df_out.columns else 0.0
-            RMPCP_A = df_out['RMPCP_A'] if 'RMPCP_A' in df_out.columns else 0.0
-            RMCCP_D = df_out['RMCCP_D'] if 'RMCCP_D' in df_out.columns else 0.0
-            RMPCP_D = df_out['RMPCP_D'] if 'RMPCP_D' in df_out.columns else 0.0
-            
-            df_out['RegA_Revenue'] = df_out['RegA_MW'] * (RMCCP_A * perf_a + RMPCP_A * Mileage_RegA * perf_a) * timestep_hours - df_out['RegA_MW'] * Mileage_RegA * timestep_hours * self.deg_cost * self.mileage_factor
-            df_out['RegD_Revenue'] = df_out['RegD_MW'] * (RMCCP_D * perf_d + RMPCP_D * Mileage_RegD * perf_d) * timestep_hours - df_out['RegD_MW'] * Mileage_RegD * timestep_hours * self.deg_cost * self.mileage_factor
-            df_out['Regulation_Revenue'] = df_out['RegA_Revenue'] + df_out['RegD_Revenue']
-            df_out['Ancillary_Revenue'] = df_out['Regulation_Revenue'] + df_out['SYNCH_Revenue'] + df_out['NONSYNCH_Revenue']
-            df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + (df_out['RegA_MW'] * Mileage_RegA + df_out['RegD_MW'] * Mileage_RegD) * timestep_hours * self.deg_cost * self.mileage_factor
+        for tr in self.tranches:
+            col = f"{tr['name']}_MW"
+            if col in df_out.columns:
+                tr_rev = df_out[col] * eff_reg_p * timestep_hours
+                tr_deg = df_out[col] * timestep_hours * self.deg_cost * self.mileage_factor
+                df_out[f"{tr['name']}_Revenue"] = tr_rev - tr_deg
+                tot_reg_rev += tr_rev
+                tot_reg_deg += tr_deg
+        
+        df_out['Regulation_Revenue'] = tot_reg_rev - tot_reg_deg
+        df_out['Ancillary_Revenue'] = df_out['Regulation_Revenue'] + df_out['SYNCH_Revenue'] + df_out['NONSYNCH_Revenue']
+        df_out['Total_Degradation_Cost'] = df_out['Energy_Degradation_Cost'] + tot_reg_deg
         
         # Capacity Revenue
         elcc = self.config.get("elcc_factor", self.elcc_factor)
@@ -386,19 +291,18 @@ class PJM_Optimizer(BESS_Simulator_Base):
         }
 
         # Tranche-specific statistics
-        if self.enable_tranches and self.tranches:
-            for tr in self.tranches:
-                col = f"{tr['name']}_MW"
-                rev_col = f"{tr['name']}_Revenue"
-                if col in df_out.columns:
-                    metrics[f"Avg Cleared {tr['name']} (MW)"] = df_out[col].mean()
-                if rev_col in df_out.columns:
-                    metrics[f"Total {tr['name']} Revenue ($)"] = df_out[rev_col].sum()
+        for tr in self.tranches:
+            col = f"{tr['name']}_MW"
+            rev_col = f"{tr['name']}_Revenue"
+            if col in df_out.columns:
+                metrics[f"Avg Cleared {tr['name']} (MW)"] = df_out[col].mean()
+            if rev_col in df_out.columns:
+                metrics[f"Total {tr['name']} Revenue ($)"] = df_out[rev_col].sum()
         
         return metrics, utilization
 
 if __name__ == "__main__":
-    print("Testing PJM_Optimizer with 250 MW / 1,000 MWh BESS and Variable Tranches...")
+    print("Testing Unified PJM_Optimizer (250 MW / 1,000 MWh BESS)...")
     custom_tranches = [
         {"name": "Tranche 1 (Base)", "mw": 50.0, "hurdle_rate": 0.0},
         {"name": "Tranche 2 (Mid)",  "mw": 50.0, "hurdle_rate": 30.0},
@@ -412,15 +316,14 @@ if __name__ == "__main__":
         max_cycles_per_day=1.2,
         capacity_price_mw_day=329.17,
         elcc_factor=0.50,
-        enable_tranches=True,
         tranches=custom_tranches
     )
     
-    df_sample = optimizer.generate_sample_data(days=14)
+    df_sample = optimizer.generate_sample_data(days=7)
     df_results = optimizer.run_optimization_dispatch(df_sample)
     metrics, _ = optimizer.calculate_summary_metrics(df_results)
     
-    print("\n=== PJM 250 MW 14-DAY OPTIMIZATION METRICS ===")
+    print("\n=== PJM 250 MW 7-DAY UNIFIED OPTIMIZATION METRICS ===")
     for k, v in metrics.items():
         if "$" in k:
             print(f"{k:<45}: ${v:>12,.2f}")
