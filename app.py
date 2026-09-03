@@ -179,7 +179,7 @@ def get_pjm_template_bytes():
             
     if xlsx_bytes is None or csv_bytes is None:
         pjm_opt = PJM_Optimizer()
-        df_sample = pjm_opt.generate_sample_data(days=7)
+        df_sample = pjm_opt.generate_sample_data(days=365)
         df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
         
         if csv_bytes is None:
@@ -194,22 +194,22 @@ def get_pjm_template_bytes():
     return xlsx_bytes, csv_bytes
 
 if selected_market == "PJM":
-    st.caption("💡 **Need a template?** Download pre-formatted PJM input files with realistic pricing curves and formulas:")
+    st.caption("💡 **Need an 8,760-hour template?** Download pre-formatted full-year PJM input files with realistic pricing curves and formulas:")
     tmpl_col1, tmpl_col2 = st.columns([1, 1])
     xlsx_data, csv_data = get_pjm_template_bytes()
     with tmpl_col1:
         st.download_button(
-            label="📥 Download PJM Template (.xlsx)",
+            label="📥 Download 8760 PJM Template (.xlsx)",
             data=xlsx_data,
-            file_name="PJM_Market_Template.xlsx",
+            file_name="PJM_Market_Template_8760.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
     with tmpl_col2:
         st.download_button(
-            label="📥 Download PJM Template (.csv)",
+            label="📥 Download 8760 PJM Template (.csv)",
             data=csv_data,
-            file_name="PJM_Market_Template.csv",
+            file_name="PJM_Market_Template_8760.csv",
             mime="text/csv",
             use_container_width=True
         )
