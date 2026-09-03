@@ -156,9 +156,11 @@ else:
 st.info(f"Required columns (case-insensitive): {required_cols_msg}")
 
 if selected_market == "PJM":
+    st.caption("💡 **Need a template?** Download pre-formatted PJM input files with realistic pricing curves and formulas:")
     tmpl_col1, tmpl_col2 = st.columns([1, 1])
-    tmpl_xlsx = os.path.join(os.path.dirname(__file__), "PJM_Market_Template.xlsx")
-    tmpl_csv = os.path.join(os.path.dirname(__file__), "PJM_Market_Template.csv")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    tmpl_xlsx = os.path.join(base_dir, "PJM_Market_Template.xlsx")
+    tmpl_csv = os.path.join(base_dir, "PJM_Market_Template.csv")
     with tmpl_col1:
         if os.path.exists(tmpl_xlsx):
             with open(tmpl_xlsx, "rb") as f:
