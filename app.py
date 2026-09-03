@@ -155,6 +155,31 @@ else:
 
 st.info(f"Required columns (case-insensitive): {required_cols_msg}")
 
+if selected_market == "PJM":
+    tmpl_col1, tmpl_col2 = st.columns([1, 1])
+    tmpl_xlsx = os.path.join(os.path.dirname(__file__), "PJM_Market_Template.xlsx")
+    tmpl_csv = os.path.join(os.path.dirname(__file__), "PJM_Market_Template.csv")
+    with tmpl_col1:
+        if os.path.exists(tmpl_xlsx):
+            with open(tmpl_xlsx, "rb") as f:
+                st.download_button(
+                    label="📥 Download PJM Template (.xlsx)",
+                    data=f.read(),
+                    file_name="PJM_Market_Template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+    with tmpl_col2:
+        if os.path.exists(tmpl_csv):
+            with open(tmpl_csv, "rb") as f:
+                st.download_button(
+                    label="📥 Download PJM Template (.csv)",
+                    data=f.read(),
+                    file_name="PJM_Market_Template.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
 uploaded_file = st.file_uploader("Upload Market CSV or Excel file", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
