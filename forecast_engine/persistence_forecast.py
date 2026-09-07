@@ -24,11 +24,21 @@ class PersistenceForecastEngine(BaseForecastEngine):
         - forecast_horizon_hrs: Look-ahead window in hours.
         - future_actual_df: The actual future dataframe (if testing noisy actual forecasts).
         """
+        current_time = pd.to_datetime(current_time)
         forecast_times = pd.date_range(start=current_time, periods=forecast_horizon_hrs, freq='h')
         forecast_df = pd.DataFrame(index=forecast_times)
         
+        # Ensure df_history index is a DatetimeIndex
+        if not df_history.empty and not isinstance(df_history.index, pd.DatetimeIndex):
+            df_history.index = pd.to_datetime(df_history.index)
+
+        if future_actual_df is not None and not future_actual_df.empty and not isinstance(future_actual_df.index, pd.DatetimeIndex):
+            future_actual_df.index = pd.to_datetime(future_actual_df.index)
+        
         # Identify price columns
         price_cols = [c for c in df_history.columns if c != 'timestamp']
+        if not price_cols and future_actual_df is not None:
+            price_cols = [c for c in future_actual_df.columns if c != 'timestamp']
         
         for col in price_cols:
             if self.method == "noisy_actual" and future_actual_df is not None:
@@ -37,7 +47,17 @@ class PersistenceForecastEngine(BaseForecastEngine):
                 forecast_df[col] = self.add_forecast_noise(actual_subset, self.mape)
                 
             elif self.method == "rolling_average":
-                # Average of values at the same hour of day over the last N days
+                # If history is empty at initial step (t=0), fallback gracefully
+                if df_history.empty or len(df_history) == 0:
+                    if future_actual_df is not None and col in future_actual_df.columns:
+                        vals = future_actual_df[col].iloc[:forecast_horizon_hrs].tolist()
+                        if len(vals) < forecast_horizon_hrs:
+                            vals += [vals[-1] if vals else 30.0] * (forecast_horizon_hrs - len(vals))
+                        forecast_df[col] = vals
+                    else:
+                        forecast_df[col] = 30.0
+                    continue
+
                 target_hours = forecast_times.hour
                 forecast_vals = []
                 for h in target_hours:
@@ -49,14 +69,32 @@ class PersistenceForecastEngine(BaseForecastEngine):
                     else:
                         # Fallback to naive if not enough history
                         last_mask = df_history.index < current_time
-                        forecast_vals.append(df_history.loc[last_mask, col].iloc[-1] if last_mask.any() else 0.0)
+                        if last_mask.any():
+                            forecast_vals.append(df_history.loc[last_mask, col].iloc[-1])
+                        elif future_actual_df is not None and col in future_actual_df.columns:
+                            forecast_vals.append(future_actual_df[col].iloc[0])
+                        else:
+                            forecast_vals.append(30.0)
                 forecast_df[col] = forecast_vals
                 
             else:  # "naive"
-                # naively repeat the last observed value or the last 24h profiles
+                # If history is empty at step 0, fallback to future actual or default
+                if df_history.empty or len(df_history) == 0:
+                    if future_actual_df is not None and col in future_actual_df.columns:
+                        vals = future_actual_df[col].iloc[:forecast_horizon_hrs].tolist()
+                        if len(vals) < forecast_horizon_hrs:
+                            vals += [vals[-1] if vals else 30.0] * (forecast_horizon_hrs - len(vals))
+                        forecast_df[col] = vals
+                    else:
+                        forecast_df[col] = 30.0
+                    continue
+
                 last_mask = df_history.index < current_time
                 if not last_mask.any():
-                    forecast_df[col] = 0.0
+                    if future_actual_df is not None and col in future_actual_df.columns:
+                        forecast_df[col] = future_actual_df[col].iloc[:forecast_horizon_hrs].values
+                    else:
+                        forecast_df[col] = 30.0
                     continue
                 
                 # Check if we can do 24h persistence profile

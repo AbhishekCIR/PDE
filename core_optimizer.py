@@ -86,9 +86,15 @@ class BESS_Simulator_Base:
         T_total = len(df)
         df_out = df.copy()
         
+        # Ensure timestamp is datetime
+        if 'timestamp' in df_out.columns:
+            df_out['timestamp'] = pd.to_datetime(df_out['timestamp'])
+            df = df.copy()
+            df['timestamp'] = df_out['timestamp']
+
         # Determine timestep resolution in hours
         if T_total > 1:
-            timestep_hours = (df['timestamp'].iloc[1] - df['timestamp'].iloc[0]).total_seconds() / 3600.0
+            timestep_hours = (df_out['timestamp'].iloc[1] - df_out['timestamp'].iloc[0]).total_seconds() / 3600.0
             if timestep_hours == 0:
                 timestep_hours = 1.0
         else:
@@ -118,9 +124,9 @@ class BESS_Simulator_Base:
                 # 1. Generate price forecasts using the forecast engine
                 # Pass historical data before current_time, and future actuals if using noisy_actual mode
                 hist_subset = df.iloc[:t].set_index('timestamp')
-                # If hist_subset is empty, initialize with a dummy row to avoid issues
+                # If hist_subset is empty, initialize with empty DataFrame with DatetimeIndex
                 if len(hist_subset) == 0:
-                    hist_subset = pd.DataFrame(columns=df.columns).set_index('timestamp')
+                    hist_subset = pd.DataFrame(columns=[c for c in df.columns if c != 'timestamp'], index=pd.DatetimeIndex([]))
                     
                 # Create future actuals for forecast horizon
                 future_actuals = df.iloc[t:t+forecast_horizon_hrs].set_index('timestamp')
