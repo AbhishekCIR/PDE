@@ -250,7 +250,7 @@ else:
         elif selected_market == "MISO":
             opt = MISO_Optimizer()
         elif selected_market == "PJM":
-            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches)
+            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None)
         else:
             opt = Generic_Optimizer()
             
@@ -298,7 +298,7 @@ if st.session_state['data_df'] is not None:
                         reg_throughput_factor=reg_throughput_factor,
                         is_tolling=is_tolling_flag,
                         enable_tranches=enable_pjm_tranches,
-                        tranches=pjm_user_tranches,
+                        tranches=pjm_user_tranches if enable_pjm_tranches else None,
                         elcc_factor=elcc_factor
                     )
                 else:

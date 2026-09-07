@@ -44,14 +44,16 @@ class PJM_Optimizer(BESS_Simulator_Base):
         self.enable_tranches = enable_tranches
         
         # Configure variable regulation tranches
-        if tranches is None and enable_tranches:
+        if not enable_tranches or (tranches is not None and len(tranches) == 0):
+            self.tranches = [{"name": "Regulation", "mw": power_mw, "hurdle_rate": 0.0}]
+        elif tranches is not None and len(tranches) > 0:
+            self.tranches = tranches
+        elif enable_tranches:
             self.tranches = [
                 {"name": "Tranche 1 (Base)", "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 0.0},
                 {"name": "Tranche 2 (Mid)",  "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 30.0},
                 {"name": "Tranche 3 (Peak)", "mw": min(25.0, power_mw * 0.15), "hurdle_rate": 60.0}
             ]
-        elif tranches is not None:
-            self.tranches = tranches
         else:
             self.tranches = [{"name": "Regulation", "mw": power_mw, "hurdle_rate": 0.0}]
 
