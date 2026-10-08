@@ -64,29 +64,42 @@ deg_cost = st.sidebar.number_input("Degradation Cost ($/MWh Discharged)", min_va
 mileage_factor = st.sidebar.slider("Regulation Mileage Wear Factor", min_value=0.01, max_value=0.50, value=0.10, step=0.01, help="Fraction of regulation capacity translating to cycle wear.")
 reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", min_value=0.00, max_value=0.50, value=0.15, step=0.01, help="Approximate expected energy throughput (MWh) per cleared MW of regulation capacity per hour.")
 
-# PJM-Specific Variable Tranche Configuration
+# PJM-Specific Regulation Safeguards & Variable Tranche Configuration
 pjm_user_tranches = []
-enable_pjm_tranches = True
+enable_pjm_tranches = False
+pjm_reg_cap_pct = 20.0
 if selected_market == "PJM":
     st.sidebar.markdown("---")
+    st.sidebar.header("🛡️ PJM Regulation Market Safeguards")
+    pjm_reg_cap_pct = st.sidebar.slider(
+        "Regulation Capacity Ceiling (% of Nameplate)", 
+        min_value=0.0, 
+        max_value=100.0, 
+        value=20.0, 
+        step=5.0, 
+        help="Hard ceiling on maximum regulation capacity allowed to clear. 20% is recommended (Ram Bonthala / CHR Memo) to prevent market self-cannibalization and enable daily energy cycling."
+    )
+    pjm_calc_max_reg_mw = (pjm_reg_cap_pct / 100.0) * power_mw
+    st.sidebar.caption(f"🔒 **Enforced Max Reg Cap:** `{pjm_calc_max_reg_mw:.1f} MW` (out of `{power_mw:.1f} MW` Nameplate)")
+
     st.sidebar.header("📊 PJM Variable Regulation Tranches")
-    enable_pjm_tranches = st.sidebar.checkbox("Enable Classified Tranche Bidding", value=True, help="Divides regulation offers into segmented price-quantity tranches to prevent market self-price suppression.")
+    enable_pjm_tranches = st.sidebar.checkbox("Enable Classified Tranche Bidding", value=False, help="Divides regulation offers into segmented price-quantity tranches up to the capacity ceiling.")
     
     if enable_pjm_tranches:
         num_tranches = st.sidebar.number_input("Number of Tranches to Bid", min_value=1, max_value=10, value=3, step=1)
         default_names = ["Tranche 1 (Base)", "Tranche 2 (Mid)", "Tranche 3 (Peak)", "Tranche 4 (Spike)", "Tranche 5 (Super-Peak)"]
-        default_mws = [min(50.0, power_mw*0.25), min(50.0, power_mw*0.25), min(25.0, power_mw*0.15), 20.0, 15.0]
+        default_mws = [pjm_calc_max_reg_mw * 0.40, pjm_calc_max_reg_mw * 0.40, pjm_calc_max_reg_mw * 0.20, 0.0, 0.0]
         default_rates = [0.0, 30.0, 60.0, 90.0, 120.0]
 
         total_reg_cap = 0.0
         for i in range(int(num_tranches)):
             d_name = default_names[i] if i < len(default_names) else f"Tranche {i+1}"
-            d_mw = default_mws[i] if i < len(default_mws) else 20.0
+            d_mw = default_mws[i] if i < len(default_mws) else 0.0
             d_rate = default_rates[i] if i < len(default_rates) else float(i * 30.0)
 
             with st.sidebar.expander(f"⚙️ Config for Tranche #{i+1}", expanded=(i < 3)):
                 t_name = st.text_input(f"Name #{i+1}", value=d_name, key=f"app_tname_{i}")
-                t_mw = st.number_input(f"Capacity MW #{i+1}", min_value=0.0, max_value=float(power_mw), value=float(d_mw), step=5.0, key=f"app_tmw_{i}")
+                t_mw = st.number_input(f"Capacity MW #{i+1}", min_value=0.0, max_value=float(pjm_calc_max_reg_mw), value=float(d_mw), step=5.0, key=f"app_tmw_{i}")
                 t_rate = st.number_input(f"Offer Hurdle Rate ($/MW) #{i+1}", min_value=0.0, max_value=1000.0, value=float(d_rate), step=5.0, key=f"app_trate_{i}")
                 
                 pjm_user_tranches.append({
@@ -96,7 +109,7 @@ if selected_market == "PJM":
                 })
                 total_reg_cap += t_mw
 
-        st.sidebar.caption(f"**Total Regulation Max Cap:** {total_reg_cap:.1f} MW / {power_mw:.1f} MW ({total_reg_cap/power_mw*100:.1f}%)")
+        st.sidebar.caption(f"**Total Regulation Offer:** {total_reg_cap:.1f} MW / {pjm_calc_max_reg_mw:.1f} MW allowed cap ({total_reg_cap/power_mw*100:.1f}%)")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 Operating Mode")
@@ -250,7 +263,7 @@ else:
         elif selected_market == "MISO":
             opt = MISO_Optimizer()
         elif selected_market == "PJM":
-            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None)
+            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct)
         else:
             opt = Generic_Optimizer()
             
@@ -299,7 +312,8 @@ if st.session_state['data_df'] is not None:
                         is_tolling=is_tolling_flag,
                         enable_tranches=enable_pjm_tranches,
                         tranches=pjm_user_tranches if enable_pjm_tranches else None,
-                        elcc_factor=elcc_factor
+                        elcc_factor=elcc_factor,
+                        reg_cap_pct=pjm_reg_cap_pct
                     )
                 else:
                     optimizer = Generic_Optimizer(

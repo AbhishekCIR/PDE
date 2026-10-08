@@ -24,7 +24,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         is_tolling: bool = False,
         enable_tranches: bool = True,
         tranches: Optional[List[Dict]] = None,
-        elcc_factor: float = 0.50
+        elcc_factor: float = 0.50,
+        reg_cap_pct: float = 20.0
     ):
         super().__init__(
             power_mw=power_mw, 
@@ -42,20 +43,32 @@ class PJM_Optimizer(BESS_Simulator_Base):
         self.capacity_price_mw_day = capacity_price_mw_day
         self.elcc_factor = elcc_factor
         self.enable_tranches = enable_tranches
+        self.reg_cap_pct = float(reg_cap_pct)
+        # Hard Regulation Capacity Ceiling (e.g. 20% of Nameplate = 50 MW for 250 MW asset)
+        self.max_reg_mw = max(0.0, (self.reg_cap_pct / 100.0) * power_mw)
         
-        # Configure variable regulation tranches
+        # Configure variable regulation tranches subject to max_reg_mw
         if not enable_tranches or (tranches is not None and len(tranches) == 0):
-            self.tranches = [{"name": "Regulation", "mw": power_mw, "hurdle_rate": 0.0}]
+            self.tranches = [{"name": "Regulation", "mw": self.max_reg_mw, "hurdle_rate": 0.0}]
         elif tranches is not None and len(tranches) > 0:
-            self.tranches = tranches
+            # Re-scale user tranches if their sum exceeds the hard regulation capacity ceiling
+            total_tr_mw = sum(float(tr.get('mw', 0.0)) for tr in tranches)
+            if total_tr_mw > self.max_reg_mw and total_tr_mw > 0:
+                scale = self.max_reg_mw / total_tr_mw
+                self.tranches = [
+                    {"name": tr.get('name', f"Tranche {i+1}"), "mw": float(tr.get('mw', 0.0)) * scale, "hurdle_rate": float(tr.get('hurdle_rate', 0.0))}
+                    for i, tr in enumerate(tranches)
+                ]
+            else:
+                self.tranches = tranches
         elif enable_tranches:
             self.tranches = [
-                {"name": "Tranche 1 (Base)", "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 0.0},
-                {"name": "Tranche 2 (Mid)",  "mw": min(50.0, power_mw * 0.25), "hurdle_rate": 30.0},
-                {"name": "Tranche 3 (Peak)", "mw": min(25.0, power_mw * 0.15), "hurdle_rate": 60.0}
+                {"name": "Tranche 1 (Base)", "mw": min(25.0, self.max_reg_mw * 0.40), "hurdle_rate": 0.0},
+                {"name": "Tranche 2 (Mid)",  "mw": min(25.0, self.max_reg_mw * 0.40), "hurdle_rate": 30.0},
+                {"name": "Tranche 3 (Peak)", "mw": min(10.0, self.max_reg_mw * 0.20), "hurdle_rate": 60.0}
             ]
         else:
-            self.tranches = [{"name": "Regulation", "mw": power_mw, "hurdle_rate": 0.0}]
+            self.tranches = [{"name": "Regulation", "mw": self.max_reg_mw, "hurdle_rate": 0.0}]
 
     def get_market_soc_impact(self, subclass_vars, t, timestep_hours, is_value=False):
         """Calculates SOC depletion from regulation AGC round-trip losses."""
@@ -156,6 +169,9 @@ class PJM_Optimizer(BESS_Simulator_Base):
             # Inverter Power Limits
             prob += d[t] + tot_reg_expr + synch[t] + nonsynch[t] <= self.power_mw
             prob += c[t] + tot_reg_expr <= self.power_mw
+            
+            # Hard Regulation Ceiling (CHR Requirement: Max 20% Nameplate MW)
+            prob += tot_reg_expr <= self.max_reg_mw
             
             # SOC Continuous Headroom Buffer for PJM Regulation (30-min buffer)
             prob += soc[t] >= (0.10 * self.energy_mwh) + (tot_reg_expr * 0.50 + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
