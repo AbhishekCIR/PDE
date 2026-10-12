@@ -79,7 +79,7 @@ class BESS_Simulator_Base:
 
     # --- Main Optimization Dispatch Engine ---
     def run_optimization_dispatch(self, df, progress_callback=None, forecast_engine=None, 
-                                  forecast_horizon_hrs=48, forecast_mape=0.0):
+                                  forecast_horizon_hrs=48, forecast_mape=0.0, rolling_step_hrs=24):
         """
         Runs co-optimization dispatch under either Perfect Foresight or Rolling Horizon.
         """
@@ -114,129 +114,128 @@ class BESS_Simulator_Base:
         if forecast_engine is not None:
             # Setup history tracker (we index by timestamp)
             df_history = df.set_index('timestamp')
+            step_size = max(1, int(rolling_step_hrs))
             
-            for t in tqdm(range(T_total), desc=f'Solving Rolling Horizon ({self.market_name})'):
-                if progress_callback:
-                    progress_callback(t, T_total)
+            t = 0
+            with tqdm(total=T_total, desc=f'Solving Rolling Horizon ({self.market_name})') as pbar:
+                while t < T_total:
+                    if progress_callback:
+                        progress_callback(t, T_total)
+                        
+                    current_time = df['timestamp'].iloc[t]
                     
-                current_time = df['timestamp'].iloc[t]
-                
-                # 1. Generate price forecasts using the forecast engine
-                # Pass historical data before current_time, and future actuals if using noisy_actual mode
-                hist_subset = df.iloc[:t].set_index('timestamp')
-                # If hist_subset is empty, initialize with empty DataFrame with DatetimeIndex
-                if len(hist_subset) == 0:
-                    hist_subset = pd.DataFrame(columns=[c for c in df.columns if c != 'timestamp'], index=pd.DatetimeIndex([]))
+                    # 1. Generate price forecasts using the forecast engine
+                    hist_subset = df.iloc[:t].set_index('timestamp')
+                    if len(hist_subset) == 0:
+                        hist_subset = pd.DataFrame(columns=[c for c in df.columns if c != 'timestamp'], index=pd.DatetimeIndex([]))
+                        
+                    future_actuals = df.iloc[t:t+forecast_horizon_hrs].set_index('timestamp')
                     
-                # Create future actuals for forecast horizon
-                future_actuals = df.iloc[t:t+forecast_horizon_hrs].set_index('timestamp')
-                
-                forecast_df = forecast_engine.generate_forecast(
-                    df_history=hist_subset,
-                    current_time=current_time,
-                    forecast_horizon_hrs=forecast_horizon_hrs,
-                    future_actual_df=future_actuals
-                )
-                
-                T_window = len(forecast_df)
-                if T_window == 0:
-                    break
+                    forecast_df = forecast_engine.generate_forecast(
+                        df_history=hist_subset,
+                        current_time=current_time,
+                        forecast_horizon_hrs=forecast_horizon_hrs,
+                        future_actual_df=future_actuals
+                    )
                     
-                # 2. Build the MILP problem for the look-ahead window
-                prob = pulp.LpProblem(f"BESS_Rolling_{t}", pulp.LpMaximize)
-                
-                c = pulp.LpVariable.dicts("Charge", range(T_window), lowBound=0, upBound=self.power_mw)
-                d = pulp.LpVariable.dicts("Discharge", range(T_window), lowBound=0, upBound=self.power_mw)
-                soc = pulp.LpVariable.dicts("SoC", range(T_window), lowBound=0, upBound=self.energy_mwh)
-                
-                # Charging and discharging binary state variables
-                u_c = pulp.LpVariable.dicts("u_C", range(T_window), cat='Binary')
-                u_d = pulp.LpVariable.dicts("u_D", range(T_window), cat='Binary')
-                
-                # Infeasibility slacks
-                s_min = pulp.LpVariable.dicts("s_min", range(T_window), lowBound=0)
-                s_max = pulp.LpVariable.dicts("s_max", range(T_window), lowBound=0)
-                
-                subclass_vars = self.define_market_variables(prob, T_window)
-                self.current_df = forecast_df
-                
-                # Objective formulation: Energy Arbitrage + AS cleared revenues - degradation cost - infeasibility penalties
-                LMP = forecast_df['LMP'].values
-                Charge_LMP = forecast_df['Charge_LMP'].values if 'Charge_LMP' in forecast_df.columns else LMP
-                CAP_LIMIT = forecast_df['CAP_LIMIT'].values if 'CAP_LIMIT' in forecast_df.columns else np.full(T_window, self.power_mw)
-                
-                # Check for other prices and fill missing if necessary
-                for col in forecast_df.columns:
-                    if col not in forecast_df:
-                        forecast_df[col] = 0.0
-                
-                # Base energy objective (supporting tolling agreements via Charge_LMP)
-                energy_obj = pulp.lpSum([
-                    (d[w] * LMP[w] - c[w] * Charge_LMP[w]) * timestep_hours for w in range(T_window)
-                ])
-                
-                # Degradation penalty (energy throughput-based degradation)
-                # Subclasses can add AS mileage degradation to this
-                deg_obj = pulp.lpSum([
-                    (c[w] * self.eff_c + d[w] * (1.0 / self.eff_d)) * timestep_hours * self.deg_cost for w in range(T_window)
-                ])
-                
-                # Market specific co-optimization terms
-                market_obj = self.get_objective_expression(prob, c, d, soc, subclass_vars, forecast_df, T_window, timestep_hours)
-                
-                # Infeasibility slack penalty
-                slack_penalty = pulp.lpSum([
-                    (s_min[w] + s_max[w]) * 1000000.0 for w in range(T_window)
-                ])
-                
-                prob += energy_obj + market_obj - deg_obj - slack_penalty
-                
-                # Physical BESS Constraints with Infeasibility Slacks
-                for w in range(T_window):
-                    prob += c[w] <= CAP_LIMIT[w] * u_c[w]
-                    prob += d[w] <= CAP_LIMIT[w] * u_d[w]
-                    prob += u_c[w] + u_d[w] <= 1
+                    T_window = len(forecast_df)
+                    if T_window == 0:
+                        break
+                        
+                    # 2. Build the MILP problem for the look-ahead window
+                    prob = pulp.LpProblem(f"BESS_Rolling_{t}", pulp.LpMaximize)
                     
-                    # SoC limits relaxed by slack variables
-                    prob += soc[w] >= 0.0 - s_min[w]
-                    prob += soc[w] <= self.energy_mwh + s_max[w]
+                    c = pulp.LpVariable.dicts("Charge", range(T_window), lowBound=0, upBound=self.power_mw)
+                    d = pulp.LpVariable.dicts("Discharge", range(T_window), lowBound=0, upBound=self.power_mw)
+                    soc = pulp.LpVariable.dicts("SoC", range(T_window), lowBound=0, upBound=self.energy_mwh)
                     
-                    if w == 0:
-                        prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
-                    else:
-                        prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
-                
-                # Daily cycle constraint mapped across the look-ahead window (scaled proportionally)
-                prob += pulp.lpSum([d[w] * timestep_hours for w in range(T_window)]) <= (self.max_cycles * self.energy_mwh * (T_window * timestep_hours / 24.0))
-                
-                # Add market-specific constraints
-                self.add_market_constraints(prob, c, d, soc, subclass_vars, forecast_df, T_window, timestep_hours)
-                
-                # Solve using PuLP CBC Solver with gap tolerance and warm starts (sequential initialization)
-                solver = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
-                prob.solve(solver)
-                
-                # 3. Apply the first hour's dispatch result
-                charge_mw_arr[t] = c[0].varValue or 0.0
-                discharge_mw_arr[t] = d[0].varValue or 0.0
-                
-                # Keep variables within physical limits due to slight solver numerical precision noise
-                charge_mw_arr[t] = np.clip(charge_mw_arr[t], 0.0, self.power_mw)
-                discharge_mw_arr[t] = np.clip(discharge_mw_arr[t], 0.0, self.power_mw)
-                
-                # State of charge dynamics updates based on actual executed step
-                next_soc = current_soc + charge_mw_arr[t] * self.eff_c * timestep_hours - (discharge_mw_arr[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, 0, timestep_hours, is_value=True)
-                next_soc = np.clip(next_soc, 0.0, self.energy_mwh)
-                soc_mwh_arr[t] = next_soc
-                
-                # Extract market decisions for the first step
-                step_results = self.extract_market_results(subclass_vars, [0])
-                for key, val in step_results.items():
-                    if key not in market_res_dicts:
-                        market_res_dicts[key] = np.zeros(T_total)
-                    market_res_dicts[key][t] = val[0] or 0.0
-                
-                current_soc = next_soc
+                    # Charging and discharging binary state variables
+                    u_c = pulp.LpVariable.dicts("u_C", range(T_window), cat='Binary')
+                    u_d = pulp.LpVariable.dicts("u_D", range(T_window), cat='Binary')
+                    
+                    # Infeasibility slacks
+                    s_min = pulp.LpVariable.dicts("s_min", range(T_window), lowBound=0)
+                    s_max = pulp.LpVariable.dicts("s_max", range(T_window), lowBound=0)
+                    
+                    subclass_vars = self.define_market_variables(prob, T_window)
+                    self.current_df = forecast_df
+                    
+                    # Objective formulation: Energy Arbitrage + AS cleared revenues - degradation cost - infeasibility penalties
+                    LMP = forecast_df['LMP'].values
+                    Charge_LMP = forecast_df['Charge_LMP'].values if 'Charge_LMP' in forecast_df.columns else LMP
+                    CAP_LIMIT = forecast_df['CAP_LIMIT'].values if 'CAP_LIMIT' in forecast_df.columns else np.full(T_window, self.power_mw)
+                    
+                    # Check for other prices and fill missing if necessary
+                    for col in forecast_df.columns:
+                        if col not in forecast_df:
+                            forecast_df[col] = 0.0
+                    
+                    # Base energy objective (supporting tolling agreements via Charge_LMP)
+                    energy_obj = pulp.lpSum([
+                        (d[w] * LMP[w] - c[w] * Charge_LMP[w]) * timestep_hours for w in range(T_window)
+                    ])
+                    
+                    # Degradation penalty (energy throughput-based degradation)
+                    deg_obj = pulp.lpSum([
+                        (c[w] * self.eff_c + d[w] * (1.0 / self.eff_d)) * timestep_hours * self.deg_cost for w in range(T_window)
+                    ])
+                    
+                    # Market specific co-optimization terms
+                    market_obj = self.get_objective_expression(prob, c, d, soc, subclass_vars, forecast_df, T_window, timestep_hours)
+                    
+                    # Infeasibility slack penalty
+                    slack_penalty = pulp.lpSum([
+                        (s_min[w] + s_max[w]) * 1000000.0 for w in range(T_window)
+                    ])
+                    
+                    prob += energy_obj + market_obj - deg_obj - slack_penalty
+                    
+                    # Physical BESS Constraints with Infeasibility Slacks
+                    for w in range(T_window):
+                        prob += c[w] <= CAP_LIMIT[w] * u_c[w]
+                        prob += d[w] <= CAP_LIMIT[w] * u_d[w]
+                        prob += u_c[w] + u_d[w] <= 1
+                        
+                        # SoC limits relaxed by slack variables
+                        prob += soc[w] >= 0.0 - s_min[w]
+                        prob += soc[w] <= self.energy_mwh + s_max[w]
+                        
+                        if w == 0:
+                            prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
+                        else:
+                            prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
+                    
+                    # Daily cycle constraint mapped across the look-ahead window (scaled proportionally)
+                    prob += pulp.lpSum([d[w] * timestep_hours for w in range(T_window)]) <= (self.max_cycles * self.energy_mwh * (T_window * timestep_hours / 24.0))
+                    
+                    # Add market-specific constraints
+                    self.add_market_constraints(prob, c, d, soc, subclass_vars, forecast_df, T_window, timestep_hours)
+                    
+                    # Solve using PuLP CBC Solver with gap tolerance and warm starts (sequential initialization)
+                    solver = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
+                    prob.solve(solver)
+                    
+                    # 3. Apply the dispatch results across the rolling step window
+                    step_exec = min(step_size, T_window, T_total - t)
+                    for k in range(step_exec):
+                        curr_t = t + k
+                        charge_mw_arr[curr_t] = np.clip(c[k].varValue or 0.0, 0.0, self.power_mw)
+                        discharge_mw_arr[curr_t] = np.clip(d[k].varValue or 0.0, 0.0, self.power_mw)
+                        
+                        next_soc = current_soc + charge_mw_arr[curr_t] * self.eff_c * timestep_hours - (discharge_mw_arr[curr_t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, k, timestep_hours, is_value=True)
+                        next_soc = np.clip(next_soc, 0.0, self.energy_mwh)
+                        soc_mwh_arr[curr_t] = next_soc
+                        current_soc = next_soc
+                    
+                    step_results = self.extract_market_results(subclass_vars, range(step_exec))
+                    for key, val in step_results.items():
+                        if key not in market_res_dicts:
+                            market_res_dicts[key] = np.zeros(T_total)
+                        for k in range(step_exec):
+                            market_res_dicts[key][t + k] = val[k] or 0.0
+                    
+                    t += step_exec
+                    pbar.update(step_exec)
 
         # --- Mode B: Perfect Foresight Day-by-Day (Deterministic Benchmark) ---
         else:

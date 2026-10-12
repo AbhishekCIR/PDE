@@ -58,24 +58,18 @@ class PersistenceForecastEngine(BaseForecastEngine):
                         forecast_df[col] = 30.0
                     continue
 
-                target_hours = forecast_times.hour
-                forecast_vals = []
-                for h in target_hours:
-                    # Filter history for the same hour
-                    h_mask = (df_history.index.hour == h) & (df_history.index < current_time)
-                    h_values = df_history.loc[h_mask, col].tail(self.rolling_days)
-                    if len(h_values) > 0:
-                        forecast_vals.append(h_values.mean())
-                    else:
-                        # Fallback to naive if not enough history
-                        last_mask = df_history.index < current_time
-                        if last_mask.any():
-                            forecast_vals.append(df_history.loc[last_mask, col].iloc[-1])
-                        elif future_actual_df is not None and col in future_actual_df.columns:
-                            forecast_vals.append(future_actual_df[col].iloc[0])
-                        else:
-                            forecast_vals.append(30.0)
-                forecast_df[col] = forecast_vals
+                # Fast vectorized rolling average by hour-of-day
+                recent_tail = df_history.iloc[-self.rolling_days * 24:]
+                if col in recent_tail.columns and len(recent_tail) > 0:
+                    hour_means = recent_tail.groupby(recent_tail.index.hour)[col].mean()
+                    target_hours = forecast_times.hour
+                    vals = target_hours.map(hour_means)
+                    if vals.isna().any():
+                        fallback_val = recent_tail[col].iloc[-1]
+                        vals = vals.fillna(fallback_val)
+                    forecast_df[col] = vals.values
+                else:
+                    forecast_df[col] = 30.0
                 
             else:  # "naive"
                 # If history is empty at step 0, fallback to future actual or default

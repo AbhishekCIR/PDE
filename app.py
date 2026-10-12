@@ -148,10 +148,18 @@ forecast_method = "naive"
 forecast_horizon_hrs = 48
 forecast_mape = 0.0
 
+rolling_step_hrs = 24
 if selected_sim_mode == "Rolling Horizon (Forecast-Driven)":
     st.sidebar.subheader("Forecast Engine Configuration")
-    forecast_method = st.sidebar.selectbox("Forecasting Algorithm", options=["naive", "rolling_average", "noisy_actual"], index=0)
+    forecast_method = st.sidebar.selectbox("Forecasting Algorithm", options=["rolling_average", "naive", "noisy_actual"], index=0)
     forecast_horizon_hrs = st.sidebar.slider("Look-ahead Horizon (Hours)", min_value=12, max_value=168, value=48, step=12)
+    rolling_step_hrs = st.sidebar.selectbox(
+        "Dispatch Execution Step",
+        options=[24, 12, 6, 1],
+        index=0,
+        format_func=lambda x: f"{x} Hours (Fast Daily Rolling - Recommended)" if x == 24 else f"{x} Hour(s)",
+        help="How many hours of optimal dispatch are committed before re-forecasting. 24 hours reflects standard Day-Ahead BESS operations and executes in seconds."
+    )
     if forecast_method == "noisy_actual":
         forecast_mape = st.sidebar.slider("Forecast Error (MAPE %)", min_value=0, max_value=50, value=15, step=5) / 100.0
 
@@ -162,6 +170,8 @@ if 'data_source' not in st.session_state:
     st.session_state['data_source'] = None
 if 'active_market' not in st.session_state:
     st.session_state['active_market'] = None
+if 'opt_results' not in st.session_state:
+    st.session_state['opt_results'] = None
 
 # --- MAIN PAGE INGESTION ---
 st.write(f"### 1. Ingest telemetry data for **{selected_market}**")
@@ -374,7 +384,8 @@ if st.session_state['data_df'] is not None:
                     progress_callback=update_progress,
                     forecast_engine=forecaster,
                     forecast_horizon_hrs=forecast_horizon_hrs,
-                    forecast_mape=forecast_mape
+                    forecast_mape=forecast_mape,
+                    rolling_step_hrs=rolling_step_hrs
                 )
                 progress_bar.empty()
                 st.success("Optimization Solved Successfully!")
@@ -387,90 +398,8 @@ if st.session_state['data_df'] is not None:
                     metrics['Static Capacity Revenue ($)'] = 0.0
                     df_opt['Capacity_Revenue'] = 0.0
                     df_opt['revenue'] = df_opt['Energy_Revenue'] + df_opt['Ancillary_Revenue'] - df_opt['Total_Degradation_Cost']
-                
-                st.subheader("📊 Operational & Financial Dashboard")
-                
-                # Metric Cards
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
-                c2.metric("Energy Arbitrage Revenue", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
-                c3.metric("Ancillary Services Revenue", f"${metrics['Ancillary Services Revenue ($)']:,.2f}")
-                c4.metric("Capacity Revenue (Compliance)", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
-                
-                c5, c6, c7, c8 = st.columns(4)
-                c5.metric("Degradation Cost", f"-${metrics['Degradation Expense ($)']:,.2f}")
-                c6.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f} cycles")
-                c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
-                c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
 
-                # Tranche Breakdown Metrics
-                if selected_market == "PJM" and enable_pjm_tranches and pjm_user_tranches:
-                    st.markdown("---")
-                    st.subheader("📈 PJM Regulation Tranche Breakdown")
-                    tranche_cols_ui = st.columns(len(pjm_user_tranches))
-                    for idx, tr in enumerate(pjm_user_tranches):
-                        t_name = tr['name']
-                        avg_cleared = metrics.get(f"Avg Cleared {t_name} (MW)", 0.0)
-                        tot_rev = metrics.get(f"Total {t_name} Revenue ($)", 0.0)
-                        with tranche_cols_ui[idx]:
-                            st.metric(
-                                label=f"{t_name} ({tr['mw']} MW @ ${tr['hurdle_rate']}/MW)",
-                                value=f"${tot_rev:,.2f}",
-                                delta=f"Avg Cleared: {avg_cleared:.1f} MW"
-                            )
-
-                # Charts
-                st.markdown("---")
-                st.subheader("🔋 State of Charge and Prices (HE 1-168 Preview)")
-                preview_len = min(168, len(df_opt))
-                chart_df = df_opt.head(preview_len).copy()
-                
-                base_chart = altair.Chart(chart_df).encode(x='timestamp:T')
-                soc_line = base_chart.mark_line(color='#38BDF8', strokeWidth=3).encode(
-                    y=altair.Y('soc_mwh:Q', title='State of Charge (MWh)')
-                )
-                price_line = base_chart.mark_line(color='#F43F5E', strokeWidth=1, strokeDash=[4,4]).encode(
-                    y=altair.Y('LMP:Q', title='LMP Price ($/MWh)')
-                )
-                dual_chart = altair.layer(soc_line, price_line).resolve_scale(y='independent').properties(height=380)
-                st.altair_chart(dual_chart, use_container_width=True)
-
-                st.subheader("⚡ Hourly Power Dispatch Profile (HE 1-72 Preview)")
-                disp_preview = df_opt.head(min(72, len(df_opt))).copy()
-                disp_preview['Hour_Label'] = disp_preview['timestamp'].dt.strftime('%m/%d %H:00')
-                
-                active_disp_cols = ['charge_mw', 'discharge_mw']
-                if selected_market == "PJM" and enable_pjm_tranches and pjm_user_tranches:
-                    for tr in pjm_user_tranches:
-                        c_name = f"{tr['name']}_MW"
-                        if c_name in disp_preview.columns:
-                            active_disp_cols.append(c_name)
-                elif 'Total_Reg_MW' in disp_preview.columns:
-                    active_disp_cols.append('Total_Reg_MW')
-                
-                if 'SYNCH_MW' in disp_preview.columns:
-                    active_disp_cols.append('SYNCH_MW')
-
-                disp_melt = pd.melt(
-                    disp_preview, 
-                    id_vars=['Hour_Label'], 
-                    value_vars=[col for col in active_disp_cols if col in disp_preview.columns],
-                    var_name='Dispatch_Stream',
-                    value_name='MW'
-                )
-
-                dispatch_bar_chart = altair.Chart(disp_melt).mark_bar().encode(
-                    x=altair.X('Hour_Label:N', title='Timestamp', axis=altair.Axis(labelAngle=-45)),
-                    y=altair.Y('MW:Q', title='Allocated MW'),
-                    color=altair.Color('Dispatch_Stream:N', scale=altair.Scale(scheme='tableau10')),
-                    tooltip=['Hour_Label', 'Dispatch_Stream', altair.Tooltip('MW:Q', format='.1f')]
-                ).properties(height=380)
-                st.altair_chart(dispatch_bar_chart, use_container_width=True)
-
-                st.subheader("📋 Detailed Dispatch Results Preview")
-                st.dataframe(df_opt.head(72), use_container_width=True)
-
-                # Build Audit-Ready Formula-Linked Excel Workbook with Dashboard Tab
+                # Pre-generate live formula Excel workbook
                 excel_bytes = export_bess_dashboard_excel(
                     df_results=df_opt,
                     metrics=metrics,
@@ -484,15 +413,157 @@ if st.session_state['data_df'] is not None:
                     tranches=pjm_user_tranches if (selected_market == "PJM" and enable_pjm_tranches) else None,
                     market_name=selected_market
                 )
-                        
-                st.download_button(
-                    label="💾 Download Formula-Linked Results & Dashboard (.xlsx)",
-                    data=excel_bytes,
-                    file_name=f"BESS_Optimized_Dashboard_{selected_market}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+
+                # Persist results in session_state so clicking Download or tabs never causes results to disappear!
+                st.session_state['opt_results'] = {
+                    'df_opt': df_opt,
+                    'metrics': metrics,
+                    'excel_bytes': excel_bytes,
+                    'market_name': selected_market,
+                    'enable_pjm_tranches': enable_pjm_tranches,
+                    'pjm_user_tranches': pjm_user_tranches
+                }
+                st.success("Optimization Solved Successfully! Detailed results and download options are displayed below.")
                 
             except Exception as e:
                 st.error(f"Solver Error: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+
+
+# --- PERSISTENT RESULTS DASHBOARD ---
+# Rendered outside the Execute button so results NEVER vanish on re-runs or downloads
+if st.session_state.get('opt_results') is not None:
+    res = st.session_state['opt_results']
+    df_opt = res['df_opt']
+    metrics = res['metrics']
+    excel_bytes = res['excel_bytes']
+    market_res_name = res['market_name']
+    enable_tr_res = res.get('enable_pjm_tranches', False)
+    tr_res = res.get('pjm_user_tranches', [])
+
+    st.markdown("---")
+    st.subheader(f"📊 Operational & Financial Dashboard ({market_res_name})")
+
+    # Immediate Download Bar at the top of results
+    dl_col1, dl_col2 = st.columns([2, 1])
+    with dl_col1:
+        st.download_button(
+            label="📥 Download Audit-Ready Excel Dashboard (.xlsx)",
+            data=excel_bytes,
+            file_name=f"BESS_Optimized_Dashboard_{market_res_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+            key="dl_xlsx_top_persistent"
+        )
+    with dl_col2:
+        st.download_button(
+            label="📄 Download Raw Hourly CSV",
+            data=df_opt.to_csv(index=False).encode('utf-8'),
+            file_name=f"BESS_Optimized_Hourly_{market_res_name}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_csv_top_persistent"
+        )
+
+    # Metric Cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
+    c2.metric("Energy Arbitrage Revenue", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
+    c3.metric("Ancillary Services Revenue", f"${metrics['Ancillary Services Revenue ($)']:,.2f}")
+    c4.metric("Capacity Revenue (Compliance)", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
+    
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Degradation Cost", f"-${metrics['Degradation Expense ($)']:,.2f}")
+    c6.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f} cycles")
+    c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
+    c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
+
+    # Tranche Breakdown Metrics
+    if market_res_name == "PJM" and enable_tr_res and tr_res:
+        st.markdown("---")
+        st.subheader("📊 PJM Regulation Tranche Breakdown")
+        tranche_cols_ui = st.columns(len(tr_res))
+        for idx, tr in enumerate(tr_res):
+            t_name = tr['name']
+            avg_cleared = metrics.get(f"Avg Cleared {t_name} (MW)", 0.0)
+            tot_rev = metrics.get(f"Total {t_name} Revenue ($)", 0.0)
+            with tranche_cols_ui[idx]:
+                st.metric(
+                    label=f"{t_name} ({tr['mw']} MW @ ${tr['hurdle_rate']}/MW)",
+                    value=f"${tot_rev:,.2f}",
+                    delta=f"Avg Cleared: {avg_cleared:.1f} MW"
+                )
+
+    # Charts
+    st.markdown("---")
+    st.subheader("📈 State of Charge and Prices (HE 1-168 Preview)")
+    preview_len = min(168, len(df_opt))
+    chart_df = df_opt.head(preview_len).copy()
+    
+    base_chart = altair.Chart(chart_df).encode(x='timestamp:T')
+    soc_line = base_chart.mark_line(color='#38BDF8', strokeWidth=3).encode(
+        y=altair.Y('soc_mwh:Q', title='State of Charge (MWh)')
+    )
+    price_line = base_chart.mark_line(color='#F43F5E', strokeWidth=1, strokeDash=[4,4]).encode(
+        y=altair.Y('LMP:Q', title='LMP Price ($/MWh)')
+    )
+    dual_chart = altair.layer(soc_line, price_line).resolve_scale(y='independent').properties(height=380)
+    st.altair_chart(dual_chart, use_container_width=True)
+
+    st.subheader("⚡ Hourly Power Dispatch Profile (HE 1-72 Preview)")
+    disp_preview = df_opt.head(min(72, len(df_opt))).copy()
+    disp_preview['Hour_Label'] = disp_preview['timestamp'].dt.strftime('%m/%d %H:00')
+    
+    active_disp_cols = ['charge_mw', 'discharge_mw']
+    if market_res_name == "PJM" and enable_tr_res and tr_res:
+        for tr in tr_res:
+            c_name = f"{tr['name']}_MW"
+            if c_name in disp_preview.columns:
+                active_disp_cols.append(c_name)
+    elif 'Total_Reg_MW' in disp_preview.columns:
+        active_disp_cols.append('Total_Reg_MW')
+    
+    if 'SYNCH_MW' in disp_preview.columns:
+        active_disp_cols.append('SYNCH_MW')
+
+    disp_melt = pd.melt(
+        disp_preview, 
+        id_vars=['Hour_Label'], 
+        value_vars=[col for col in active_disp_cols if col in disp_preview.columns],
+        var_name='Dispatch_Stream',
+        value_name='MW'
+    )
+
+    dispatch_bar_chart = altair.Chart(disp_melt).mark_bar().encode(
+        x=altair.X('Hour_Label:N', title='Timestamp', axis=altair.Axis(labelAngle=-45)),
+        y=altair.Y('MW:Q', title='Allocated MW'),
+        color=altair.Color('Dispatch_Stream:N', scale=altair.Scale(scheme='tableau10')),
+        tooltip=['Hour_Label', 'Dispatch_Stream', altair.Tooltip('MW:Q', format='.1f')]
+    ).properties(height=380)
+    st.altair_chart(dispatch_bar_chart, use_container_width=True)
+
+    st.subheader("📋 Detailed Dispatch Results Preview")
+    st.dataframe(df_opt.head(72), use_container_width=True)
+
+    # Bottom Download Buttons
+    b_col1, b_col2 = st.columns([2, 1])
+    with b_col1:
+        st.download_button(
+            label="📥 Download Audit-Ready Excel Dashboard (.xlsx)",
+            data=excel_bytes,
+            file_name=f"BESS_Optimized_Dashboard_{market_res_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_xlsx_bottom_persistent",
+            use_container_width=True
+        )
+    with b_col2:
+        st.download_button(
+            label="📄 Download Raw Hourly CSV",
+            data=df_opt.to_csv(index=False).encode('utf-8'),
+            file_name=f"BESS_Optimized_Hourly_{market_res_name}.csv",
+            mime="text/csv",
+            key="dl_csv_bottom_persistent",
+            use_container_width=True
+        )
