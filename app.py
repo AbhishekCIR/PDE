@@ -273,8 +273,10 @@ else:
         elif selected_market == "MISO":
             opt = MISO_Optimizer()
         elif selected_market == "PJM":
-            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct,
-                        max_reg_hours_per_day=pjm_max_reg_hours)
+            try:
+                opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct, max_reg_hours_per_day=pjm_max_reg_hours)
+            except TypeError:
+                opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct)
         else:
             opt = Generic_Optimizer()
             
@@ -314,19 +316,24 @@ if st.session_state['data_df'] is not None:
                         reg_throughput_factor=reg_throughput_factor, is_tolling=is_tolling_flag
                     )
                 elif selected_market == "PJM":
-                    optimizer = PJM_Optimizer(
-                        power_mw=power_mw, duration_hr=duration_hr, rte=rte,
-                        max_cycles_per_day=max_cycles_per_day, initial_soc_pct=initial_soc_pct,
-                        degradation_cost_per_mwh=deg_cost, mileage_factor=mileage_factor,
-                        capacity_price_mw_day=capacity_price_mw_day,
-                        reg_throughput_factor=reg_throughput_factor,
-                        is_tolling=is_tolling_flag,
-                        enable_tranches=enable_pjm_tranches,
-                        tranches=pjm_user_tranches if enable_pjm_tranches else None,
-                        elcc_factor=elcc_factor,
-                        reg_cap_pct=pjm_reg_cap_pct,
-                        max_reg_hours_per_day=pjm_max_reg_hours
-                    )
+                    pjm_init_kwargs = {
+                        "power_mw": power_mw, "duration_hr": duration_hr, "rte": rte,
+                        "max_cycles_per_day": max_cycles_per_day, "initial_soc_pct": initial_soc_pct,
+                        "degradation_cost_per_mwh": deg_cost, "mileage_factor": mileage_factor,
+                        "capacity_price_mw_day": capacity_price_mw_day,
+                        "reg_throughput_factor": reg_throughput_factor,
+                        "is_tolling": is_tolling_flag,
+                        "enable_tranches": enable_pjm_tranches,
+                        "tranches": pjm_user_tranches if enable_pjm_tranches else None,
+                        "elcc_factor": elcc_factor,
+                        "reg_cap_pct": pjm_reg_cap_pct,
+                        "max_reg_hours_per_day": pjm_max_reg_hours
+                    }
+                    try:
+                        optimizer = PJM_Optimizer(**pjm_init_kwargs)
+                    except TypeError:
+                        pjm_init_kwargs.pop("max_reg_hours_per_day", None)
+                        optimizer = PJM_Optimizer(**pjm_init_kwargs)
                 else:
                     optimizer = Generic_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,

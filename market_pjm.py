@@ -26,7 +26,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         tranches: Optional[List[Dict]] = None,
         elcc_factor: float = 0.50,
         reg_cap_pct: float = 20.0,
-        max_reg_hours_per_day: float = 5.0
+        max_reg_hours_per_day: float = 5.0,
+        **kwargs
     ):
         super().__init__(
             power_mw=power_mw, 
@@ -44,8 +45,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         self.capacity_price_mw_day = capacity_price_mw_day
         self.elcc_factor = elcc_factor
         self.enable_tranches = enable_tranches
-        self.reg_cap_pct = float(reg_cap_pct)
-        self.max_reg_hours_per_day = float(max_reg_hours_per_day)
+        self.reg_cap_pct = float(kwargs.get('reg_cap_pct', reg_cap_pct))
+        self.max_reg_hours_per_day = float(kwargs.get('max_reg_hours_per_day', max_reg_hours_per_day))
         # Hard Regulation Capacity Ceiling (e.g. 20% of Nameplate = 50 MW for 250 MW asset)
         self.max_reg_mw = max(0.0, (self.reg_cap_pct / 100.0) * power_mw)
         
