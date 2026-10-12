@@ -25,7 +25,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         enable_tranches: bool = True,
         tranches: Optional[List[Dict]] = None,
         elcc_factor: float = 0.50,
-        reg_cap_pct: float = 20.0
+        reg_cap_pct: float = 20.0,
+        max_reg_hours_per_day: float = 5.0
     ):
         super().__init__(
             power_mw=power_mw, 
@@ -44,6 +45,7 @@ class PJM_Optimizer(BESS_Simulator_Base):
         self.elcc_factor = elcc_factor
         self.enable_tranches = enable_tranches
         self.reg_cap_pct = float(reg_cap_pct)
+        self.max_reg_hours_per_day = float(max_reg_hours_per_day)
         # Hard Regulation Capacity Ceiling (e.g. 20% of Nameplate = 50 MW for 250 MW asset)
         self.max_reg_mw = max(0.0, (self.reg_cap_pct / 100.0) * power_mw)
         
@@ -137,27 +139,29 @@ class PJM_Optimizer(BESS_Simulator_Base):
             return np.full(len(df_prices), 30.0)
 
     def define_market_variables(self, prob, T_day):
-        """Defines PJM specific LpVariables for tranches and reserves."""
-        synch = pulp.LpVariable.dicts("SYNCH", range(T_day), lowBound=0, upBound=self.power_mw)
-        nonsynch = pulp.LpVariable.dicts("NONSYNCH", range(T_day), lowBound=0, upBound=self.power_mw)
-        
+        """Defines PJM specific LpVariables for tranches, reserves, and daily hour budget."""
+        synch = {t: pulp.LpVariable(f"SYNCH_{t}", lowBound=0, upBound=self.power_mw) for t in range(T_day)}
+        nonsynch = {t: pulp.LpVariable(f"NONSYNCH_{t}", lowBound=0, upBound=self.power_mw) for t in range(T_day)}
+        u_reg = {t: pulp.LpVariable(f"u_reg_{t}", cat='Binary') for t in range(T_day)}
+
         tranche_vars = []
         for i, tr in enumerate(self.tranches):
             mw_cap = float(tr.get('mw', 0.0))
-            v = pulp.LpVariable.dicts(f"Reg_Tranche_{i}", range(T_day), lowBound=0, upBound=mw_cap)
+            v = {t: pulp.LpVariable(f"Reg_Tranche_{i}_{t}", lowBound=0, upBound=mw_cap) for t in range(T_day)}
             tranche_vars.append(v)
-        
+
         return {
             'tranche_vars': tranche_vars,
             'synch': synch,
-            'nonsynch': nonsynch
+            'nonsynch': nonsynch,
+            'u_reg': u_reg
         }
-
     def add_market_constraints(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Adds PJM power capacity, hurdle rates, and reserve SOC buffer constraints."""
         synch = subclass_vars['synch']
         nonsynch = subclass_vars['nonsynch']
         tranche_vars = subclass_vars['tranche_vars']
+        u_reg = subclass_vars.get('u_reg', {})
         
         dur_synch = self.config.get("reserve_durations", {}).get("SYNCH", 0.50)
         dur_nonsynch = self.config.get("reserve_durations", {}).get("NONSYNCH", 0.50)
@@ -170,8 +174,11 @@ class PJM_Optimizer(BESS_Simulator_Base):
             prob += d[t] + tot_reg_expr + synch[t] + nonsynch[t] <= self.power_mw
             prob += c[t] + tot_reg_expr <= self.power_mw
             
-            # Hard Regulation Ceiling (CHR Requirement: Max 20% Nameplate MW)
-            prob += tot_reg_expr <= self.max_reg_mw
+            # Hard Regulation Ceiling (CHR Requirement: Max 20% Nameplate MW) coupled to binary daily indicator
+            if t in u_reg:
+                prob += tot_reg_expr <= self.max_reg_mw * u_reg[t]
+            else:
+                prob += tot_reg_expr <= self.max_reg_mw
             
             # SOC Continuous Headroom Buffer for PJM Regulation (30-min buffer)
             prob += soc[t] >= (0.10 * self.energy_mwh) + (tot_reg_expr * 0.50 + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
@@ -182,6 +189,10 @@ class PJM_Optimizer(BESS_Simulator_Base):
                 hurdle = float(tr.get('hurdle_rate', 0.0))
                 if eff_reg_prices[t] < hurdle:
                     prob += tranche_vars[i][t] == 0
+
+        # Daily Hour Budget for Regulation (CHR Requirement: e.g. 5 hours max per day)
+        if u_reg and self.max_reg_hours_per_day < 24.0:
+            prob += pulp.lpSum([u_reg[t] * timestep_hours for t in range(T_day)]) <= self.max_reg_hours_per_day
 
     def get_objective_expression(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Returns objective function terms for PJM ancillary services."""

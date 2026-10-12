@@ -68,6 +68,7 @@ reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", mi
 pjm_user_tranches = []
 enable_pjm_tranches = False
 pjm_reg_cap_pct = 20.0
+pjm_max_reg_hours = 5.0
 if selected_market == "PJM":
     st.sidebar.markdown("---")
     st.sidebar.header("🛡️ PJM Regulation Market Safeguards")
@@ -81,6 +82,15 @@ if selected_market == "PJM":
     )
     pjm_calc_max_reg_mw = (pjm_reg_cap_pct / 100.0) * power_mw
     st.sidebar.caption(f"🔒 **Enforced Max Reg Cap:** `{pjm_calc_max_reg_mw:.1f} MW` (out of `{power_mw:.1f} MW` Nameplate)")
+
+    pjm_max_reg_hours = st.sidebar.slider(
+        "Max Daily Regulation Hours (Budget)",
+        min_value=0.0,
+        max_value=24.0,
+        value=5.0,
+        step=1.0,
+        help="Limits how many hours per day the BESS can participate in regulation. Bounding this to 4-6 hours preserves battery capacity for daily energy cycling and peak arbitrage."
+    )
 
     st.sidebar.header("📊 PJM Variable Regulation Tranches")
     enable_pjm_tranches = st.sidebar.checkbox("Enable Classified Tranche Bidding", value=False, help="Divides regulation offers into segmented price-quantity tranches up to the capacity ceiling.")
@@ -263,7 +273,8 @@ else:
         elif selected_market == "MISO":
             opt = MISO_Optimizer()
         elif selected_market == "PJM":
-            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct)
+            opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct,
+                        max_reg_hours_per_day=pjm_max_reg_hours)
         else:
             opt = Generic_Optimizer()
             
@@ -313,7 +324,8 @@ if st.session_state['data_df'] is not None:
                         enable_tranches=enable_pjm_tranches,
                         tranches=pjm_user_tranches if enable_pjm_tranches else None,
                         elcc_factor=elcc_factor,
-                        reg_cap_pct=pjm_reg_cap_pct
+                        reg_cap_pct=pjm_reg_cap_pct,
+                        max_reg_hours_per_day=pjm_max_reg_hours
                     )
                 else:
                     optimizer = Generic_Optimizer(

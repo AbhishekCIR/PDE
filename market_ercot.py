@@ -23,7 +23,7 @@ class ERCOT_Optimizer(BESS_Simulator_Base):
         if regdn_val is None: regdn_val = 0.0
         
         # RegDn charges the battery (positive impact), RegUp discharges it (negative impact) - scaled by 0.5 factor
-        return (regdn_val * self.eff_c - regup_val / self.eff_d) * self.reg_throughput_factor * 0.5 * timestep_hours
+        return (regdn_val * self.eff_c - regup_val * (1.0 / self.eff_d)) * self.reg_throughput_factor * 0.5 * timestep_hours
 
     def generate_sample_data(self, days=365, freq='1h', random_seed=None):
         """Generates synthetic ERCOT prices for 1 year."""
