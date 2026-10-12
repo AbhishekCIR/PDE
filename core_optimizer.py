@@ -2,13 +2,6 @@
 import pandas as pd
 import numpy as np
 import pulp
-
-# Ensure PuLP compatibility across all versions (v2, v3, v4)
-if not hasattr(pulp.LpVariable, 'dicts'):
-    def _pulp_dicts_compat(name, indexs, lowBound=None, upBound=None, cat='Continuous', indexStart=[]):
-        return {i: pulp.LpVariable(f"{name}_{i}", lowBound=lowBound, upBound=upBound, cat=cat) for i in indexs}
-    pulp.LpVariable.dicts = staticmethod(_pulp_dicts_compat)
-
 from tqdm import tqdm
 import json
 import os
@@ -185,7 +178,7 @@ class BESS_Simulator_Base:
                 # Degradation penalty (energy throughput-based degradation)
                 # Subclasses can add AS mileage degradation to this
                 deg_obj = pulp.lpSum([
-                    (c[w] * self.eff_c + d[w] / self.eff_d) * timestep_hours * self.deg_cost for w in range(T_window)
+                    (c[w] * self.eff_c + d[w] * (1.0 / self.eff_d)) * timestep_hours * self.deg_cost for w in range(T_window)
                 ])
                 
                 # Market specific co-optimization terms
@@ -209,9 +202,9 @@ class BESS_Simulator_Base:
                     prob += soc[w] <= self.energy_mwh + s_max[w]
                     
                     if w == 0:
-                        prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
+                        prob += soc[w] == current_soc + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
                     else:
-                        prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
+                        prob += soc[w] == soc[w-1] + c[w] * self.eff_c * timestep_hours - (d[w] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, w, timestep_hours)
                 
                 # Daily cycle constraint mapped across the look-ahead window (scaled proportionally)
                 prob += pulp.lpSum([d[w] * timestep_hours for w in range(T_window)]) <= (self.max_cycles * self.energy_mwh * (T_window * timestep_hours / 24.0))
@@ -283,7 +276,7 @@ class BESS_Simulator_Base:
                 ])
                 
                 deg_obj = pulp.lpSum([
-                    (c[t] * self.eff_c + d[t] / self.eff_d) * timestep_hours * self.deg_cost for t in range(T_day)
+                    (c[t] * self.eff_c + d[t] * (1.0 / self.eff_d)) * timestep_hours * self.deg_cost for t in range(T_day)
                 ])
                 
                 market_obj = self.get_objective_expression(prob, c, d, soc, subclass_vars, df_day, T_day, timestep_hours)
@@ -303,9 +296,9 @@ class BESS_Simulator_Base:
                     prob += soc[t] <= self.energy_mwh + s_max[t]
                     
                     if t == 0:
-                        prob += soc[t] == current_soc + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
+                        prob += soc[t] == current_soc + c[t] * self.eff_c * timestep_hours - (d[t] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
                     else:
-                        prob += soc[t] == soc[t-1] + c[t] * self.eff_c * timestep_hours - (d[t] / self.eff_d) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
+                        prob += soc[t] == soc[t-1] + c[t] * self.eff_c * timestep_hours - (d[t] * (1.0 / self.eff_d)) * timestep_hours + self.get_market_soc_impact(subclass_vars, t, timestep_hours)
                 
                 prob += pulp.lpSum([d[t] * timestep_hours for t in range(T_day)]) <= self.max_cycles * self.energy_mwh
                 

@@ -2,7 +2,7 @@ pandas
 numpy
 matplotlib
 seaborn
-pulp
+pulp==2.8.0
 streamlit>=1.35.0
 openpyxl
 xlsxwriter

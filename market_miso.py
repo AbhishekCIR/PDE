@@ -2,13 +2,6 @@
 import pandas as pd
 import numpy as np
 import pulp
-
-# Ensure PuLP compatibility across all versions (v2, v3, v4)
-if not hasattr(pulp.LpVariable, 'dicts'):
-    def _pulp_dicts_compat(name, indexs, lowBound=None, upBound=None, cat='Continuous', indexStart=[]):
-        return {i: pulp.LpVariable(f"{name}_{i}", lowBound=lowBound, upBound=upBound, cat=cat) for i in indexs}
-    pulp.LpVariable.dicts = staticmethod(_pulp_dicts_compat)
-
 from core_optimizer import BESS_Simulator_Base
 
 class MISO_Optimizer(BESS_Simulator_Base):
