@@ -158,6 +158,8 @@ class BESS_Simulator_Base:
                     s_max = pulp.LpVariable.dicts("s_max", range(T_window), lowBound=0)
                     
                     subclass_vars = self.define_market_variables(prob, T_window)
+                    subclass_vars['u_c'] = u_c
+                    subclass_vars['u_d'] = u_d
                     self.current_df = forecast_df
                     
                     # Objective formulation: Energy Arbitrage + AS cleared revenues - degradation cost - infeasibility penalties
@@ -264,6 +266,8 @@ class BESS_Simulator_Base:
                 s_max = pulp.LpVariable.dicts("s_max", range(T_day), lowBound=0)
                 
                 subclass_vars = self.define_market_variables(prob, T_day)
+                subclass_vars['u_c'] = u_c
+                subclass_vars['u_d'] = u_d
                 self.current_df = df_day
                 
                 LMP = df_day['LMP'].values

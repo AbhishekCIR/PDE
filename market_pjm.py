@@ -27,6 +27,7 @@ class PJM_Optimizer(BESS_Simulator_Base):
         elcc_factor: float = 0.50,
         reg_cap_pct: float = 20.0,
         max_reg_hours_per_day: float = 5.0,
+        allow_slicing: bool = False,
         **kwargs
     ):
         super().__init__(
@@ -47,6 +48,7 @@ class PJM_Optimizer(BESS_Simulator_Base):
         self.enable_tranches = enable_tranches
         self.reg_cap_pct = float(kwargs.get('reg_cap_pct', reg_cap_pct))
         self.max_reg_hours_per_day = float(kwargs.get('max_reg_hours_per_day', max_reg_hours_per_day))
+        self.allow_slicing = bool(kwargs.get('allow_slicing', allow_slicing))
         # Hard Regulation Capacity Ceiling (e.g. 20% of Nameplate = 50 MW for 250 MW asset)
         self.max_reg_mw = max(0.0, (self.reg_cap_pct / 100.0) * power_mw)
         
@@ -144,6 +146,8 @@ class PJM_Optimizer(BESS_Simulator_Base):
         synch = {t: pulp.LpVariable(f"SYNCH_{t}", lowBound=0, upBound=self.power_mw) for t in range(T_day)}
         nonsynch = {t: pulp.LpVariable(f"NONSYNCH_{t}", lowBound=0, upBound=self.power_mw) for t in range(T_day)}
         u_reg = {t: pulp.LpVariable(f"u_reg_{t}", cat='Binary') for t in range(T_day)}
+        u_synch = {t: pulp.LpVariable(f"u_synch_{t}", cat='Binary') for t in range(T_day)}
+        u_nonsynch = {t: pulp.LpVariable(f"u_nonsynch_{t}", cat='Binary') for t in range(T_day)}
 
         tranche_vars = []
         for i, tr in enumerate(self.tranches):
@@ -155,7 +159,9 @@ class PJM_Optimizer(BESS_Simulator_Base):
             'tranche_vars': tranche_vars,
             'synch': synch,
             'nonsynch': nonsynch,
-            'u_reg': u_reg
+            'u_reg': u_reg,
+            'u_synch': u_synch,
+            'u_nonsynch': u_nonsynch
         }
     def add_market_constraints(self, prob, c, d, soc, subclass_vars, df_prices, T_day, timestep_hours):
         """Adds PJM power capacity, hurdle rates, and reserve SOC buffer constraints."""
@@ -163,6 +169,10 @@ class PJM_Optimizer(BESS_Simulator_Base):
         nonsynch = subclass_vars['nonsynch']
         tranche_vars = subclass_vars['tranche_vars']
         u_reg = subclass_vars.get('u_reg', {})
+        u_synch = subclass_vars.get('u_synch', {})
+        u_nonsynch = subclass_vars.get('u_nonsynch', {})
+        u_c = subclass_vars.get('u_c', {})
+        u_d = subclass_vars.get('u_d', {})
         
         dur_synch = self.config.get("reserve_durations", {}).get("SYNCH", 0.50)
         dur_nonsynch = self.config.get("reserve_durations", {}).get("NONSYNCH", 0.50)
@@ -171,17 +181,44 @@ class PJM_Optimizer(BESS_Simulator_Base):
         for t in range(T_day):
             tot_reg_expr = pulp.lpSum([tranche_vars[i][t] for i in range(len(self.tranches))])
             
-            # Inverter Power Limits
-            prob += d[t] + tot_reg_expr + synch[t] + nonsynch[t] <= self.power_mw
-            prob += c[t] + tot_reg_expr <= self.power_mw
-            
-            # Hard Regulation Ceiling (CHR Requirement: Max 20% Nameplate MW) coupled to binary daily indicator
+            # Regulation cap coupling
             if t in u_reg:
                 prob += tot_reg_expr <= self.max_reg_mw * u_reg[t]
             else:
                 prob += tot_reg_expr <= self.max_reg_mw
-            
-            # SOC Continuous Headroom Buffer for PJM Regulation (30-min buffer)
+
+            # Synch and Non-Synch binary upper bounds
+            if t in u_synch:
+                prob += synch[t] <= self.power_mw * u_synch[t]
+            else:
+                prob += synch[t] <= self.power_mw
+
+            if t in u_nonsynch:
+                prob += nonsynch[t] <= self.power_mw * u_nonsynch[t]
+            else:
+                prob += nonsynch[t] <= self.power_mw
+
+            if not self.allow_slicing:
+                # ========================================================
+                # CLEAN PRODUCT EXCLUSIVITY (Recommended Bankable Mode)
+                # In any single hour, battery dedicates 100% to ONE service:
+                # Charge OR Discharge OR Regulation OR Synchronized Reserve OR Non-Synch
+                # ========================================================
+                if t in u_c and t in u_d and t in u_reg and t in u_synch and t in u_nonsynch:
+                    prob += u_c[t] + u_d[t] + u_reg[t] + u_synch[t] + u_nonsynch[t] <= 1
+            else:
+                # ========================================================
+                # FRACTIONAL SLICING MODE (Co-Optimized Inverter Sharing)
+                # ========================================================
+                prob += d[t] + tot_reg_expr + synch[t] <= self.power_mw
+                prob += c[t] + tot_reg_expr <= self.power_mw
+                
+                # Rule 2: Non-Synchronized Reserve is STRICTLY OFFLINE in PJM
+                # Cannot provide NONSYNCH while online (charging, discharging, or in regulation)
+                if t in u_c and t in u_d and t in u_reg:
+                    prob += nonsynch[t] <= self.power_mw * (1 - u_c[t] - u_d[t] - u_reg[t])
+
+            # Continuous SOC Headroom Buffer for PJM Regulation (30-min buffer) & Reserves
             prob += soc[t] >= (0.10 * self.energy_mwh) + (tot_reg_expr * 0.50 + synch[t] * dur_synch + nonsynch[t] * dur_nonsynch) * timestep_hours
             prob += soc[t] <= (0.90 * self.energy_mwh) - (tot_reg_expr * 0.50) * timestep_hours
             

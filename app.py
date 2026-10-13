@@ -69,6 +69,7 @@ pjm_user_tranches = []
 enable_pjm_tranches = False
 pjm_reg_cap_pct = 20.0
 pjm_max_reg_hours = 5.0
+pjm_allow_slicing = False
 if selected_market == "PJM":
     st.sidebar.markdown("---")
     st.sidebar.header("🛡️ PJM Regulation Market Safeguards")
@@ -91,6 +92,19 @@ if selected_market == "PJM":
         step=1.0,
         help="Limits how many hours per day the BESS can participate in regulation. Bounding this to 4-6 hours preserves battery capacity for daily energy cycling and peak arbitrage."
     )
+
+    st.sidebar.header("⚖️ Operational Commitment Mode")
+    pjm_dispatch_mode = st.sidebar.radio(
+        "Inverter Commitment Style",
+        options=["Clean Product Exclusivity (Recommended)", "Allow Inverter Slicing"],
+        index=0,
+        help="Clean Product Exclusivity dedicates 100% of the battery to ONE product per hour (no overlapping commitments). Allow Inverter Slicing permits co-optimized fractional MW sharing across products."
+    )
+    pjm_allow_slicing = (pjm_dispatch_mode == "Allow Inverter Slicing")
+    if not pjm_allow_slicing:
+        st.sidebar.caption("🔒 **Active:** Clean Product Exclusivity (Zero double-commitment)")
+    else:
+        st.sidebar.caption("⚡ **Active:** Inverter Slicing (Fractional MW co-optimization)")
 
     st.sidebar.header("📊 PJM Variable Regulation Tranches")
     enable_pjm_tranches = st.sidebar.checkbox("Enable Classified Tranche Bidding", value=False, help="Divides regulation offers into segmented price-quantity tranches up to the capacity ceiling.")
@@ -337,7 +351,8 @@ if st.session_state['data_df'] is not None:
                         "tranches": pjm_user_tranches if enable_pjm_tranches else None,
                         "elcc_factor": elcc_factor,
                         "reg_cap_pct": pjm_reg_cap_pct,
-                        "max_reg_hours_per_day": pjm_max_reg_hours
+                        "max_reg_hours_per_day": pjm_max_reg_hours,
+                        "allow_slicing": pjm_allow_slicing
                     }
                     try:
                         optimizer = PJM_Optimizer(**pjm_init_kwargs)
@@ -421,7 +436,8 @@ if st.session_state['data_df'] is not None:
                     'excel_bytes': excel_bytes,
                     'market_name': selected_market,
                     'enable_pjm_tranches': enable_pjm_tranches,
-                    'pjm_user_tranches': pjm_user_tranches
+                    'pjm_user_tranches': pjm_user_tranches,
+                    'allow_slicing': pjm_allow_slicing
                 }
                 st.success("Optimization Solved Successfully! Detailed results and download options are displayed below.")
                 
@@ -444,6 +460,11 @@ if st.session_state.get('opt_results') is not None:
 
     st.markdown("---")
     st.subheader(f"📊 Operational & Financial Dashboard ({market_res_name})")
+    is_slicing = res.get('allow_slicing', False)
+    if not is_slicing and market_res_name == "PJM":
+        st.info("🔒 **Commitment Style:** Clean Product Exclusivity (Audited 1-product-per-hour dispatch; Zero double-commitment).")
+    elif is_slicing and market_res_name == "PJM":
+        st.info("⚡ **Commitment Style:** Inverter Slicing (Shared fractional MW co-optimization).")
 
     # Immediate Download Bar at the top of results
     dl_col1, dl_col2 = st.columns([2, 1])
