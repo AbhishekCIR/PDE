@@ -247,7 +247,8 @@ def export_bess_dashboard_excel(
         col_s_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['SYNCH_Revenue'])
         col_cap_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['Capacity_Revenue'])
         col_deg = xlsxwriter.utility.xl_col_to_name(header_col_map['Total_Degradation_Cost'])
-        net_val = float(df_results['revenue'].iloc[i]) if 'revenue' in df_results.columns else (ene_val + reg_val + synch_rev_val + cap_rev_val - deg_val)
+        # Net revenue must strictly equal the sum of component formula columns
+        net_val = round(ene_val + reg_val + synch_rev_val + cap_rev_val - deg_val, 4)
         
         ws_disp.write_formula(i+1, header_col_map['Net_Merchant_Revenue'], f'={col_e_rev}{r}+{col_r_rev}{r}+{col_s_rev}{r}+{col_cap_rev}{r}-{col_deg}{r}', currency_fmt, value=net_val)
         
@@ -281,23 +282,31 @@ def export_bess_dashboard_excel(
     col_d_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Discharge_MW'])
     col_c_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Charge_MW'])
 
+    reg_total = float(metrics.get('Regulation Revenue ($)', 0.0))
+    cap_total = float(metrics.get('Static Capacity Revenue ($)', 0.0))
+    ene_total = float(metrics.get('Energy Arbitrage Revenue ($)', 0.0))
+    syn_total = float(metrics.get('SYNCH Revenue ($)', 0.0))
+    deg_total = float(metrics.get('Degradation Expense ($)', 0.0))
+    gross_total = reg_total + cap_total + ene_total + syn_total
+    net_operating_total = gross_total - deg_total
+
     ws_dash.write('B5', 'NET MERCHANT REVENUE', kpi_card_lbl)
-    ws_dash.write_formula('B6', f"=SUM('8760_Dispatch_Results'!{col_net_ltr}2:{col_net_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('Total Net Merchant Revenue ($)', 0.0)))
+    ws_dash.write_formula('B6', '=C19', kpi_card_val, value=net_operating_total)
 
     ws_dash.write('C5', 'REGULATION REVENUE', kpi_card_lbl)
-    ws_dash.write_formula('C6', f"=SUM('8760_Dispatch_Results'!{col_reg_ltr}2:{col_reg_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('Regulation Revenue ($)', 0.0)))
+    ws_dash.write_formula('C6', f"=SUM('8760_Dispatch_Results'!{col_reg_ltr}2:{col_reg_ltr}{num_rows+1})", kpi_card_val, value=reg_total)
 
     ws_dash.write('D5', 'ENERGY ARBITRAGE', kpi_card_lbl)
-    ws_dash.write_formula('D6', f"=SUM('8760_Dispatch_Results'!{col_ene_ltr}2:{col_ene_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('Energy Arbitrage Revenue ($)', 0.0)))
+    ws_dash.write_formula('D6', f"=SUM('8760_Dispatch_Results'!{col_ene_ltr}2:{col_ene_ltr}{num_rows+1})", kpi_card_val, value=ene_total)
 
     ws_dash.write('E5', 'CAPACITY REVENUE (RPM)', kpi_card_lbl)
-    ws_dash.write_formula('E6', f"=SUM('8760_Dispatch_Results'!{col_cap_ltr}2:{col_cap_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('Static Capacity Revenue ($)', 0.0)))
+    ws_dash.write_formula('E6', f"=SUM('8760_Dispatch_Results'!{col_cap_ltr}2:{col_cap_ltr}{num_rows+1})", kpi_card_val, value=cap_total)
 
     ws_dash.write('F5', 'SYNCH RESERVES', kpi_card_lbl)
-    ws_dash.write_formula('F6', f"=SUM('8760_Dispatch_Results'!{col_syn_ltr}2:{col_syn_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('SYNCH Revenue ($)', 0.0)))
+    ws_dash.write_formula('F6', f"=SUM('8760_Dispatch_Results'!{col_syn_ltr}2:{col_syn_ltr}{num_rows+1})", kpi_card_val, value=syn_total)
 
     ws_dash.write('G5', 'DEGRADATION EXPENSE', kpi_card_lbl)
-    ws_dash.write_formula('G6', f"=SUM('8760_Dispatch_Results'!{col_deg_ltr}2:{col_deg_ltr}{num_rows+1})", kpi_card_val, value=float(metrics.get('Degradation Expense ($)', 0.0)))
+    ws_dash.write_formula('G6', f"=SUM('8760_Dispatch_Results'!{col_deg_ltr}2:{col_deg_ltr}{num_rows+1})", kpi_card_val, value=deg_total)
 
     # Operational Cards
     tot_d_mwh = float(metrics.get('Total Discharged (MWh)', (df_results['discharge_mw'].sum() if 'discharge_mw' in df_results.columns else 0.0)))
@@ -339,16 +348,15 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('D16', '=C16/$C$17', pct_fmt)
         
     ws_dash.write('B17', 'Total Gross Merchant Revenue', bold_fmt)
-    gross_total = float(metrics.get('Regulation Revenue ($)', 0.0) + metrics.get('Static Capacity Revenue ($)', 0.0) + metrics.get('Energy Arbitrage Revenue ($)', 0.0) + metrics.get('SYNCH Revenue ($)', 0.0))
     ws_dash.write_formula('C17', '=SUM(C13:C16)', currency_bold, value=gross_total)
     ws_dash.write_formula('D17', '=SUM(D13:D16)', pct_fmt)
 
     ws_dash.write('B18', 'Less: Battery Degradation Expense', text_fmt)
-    ws_dash.write_formula('C18', '=-G6', currency_fmt, value=-float(metrics.get('Degradation Expense ($)', 0.0)))
+    ws_dash.write_formula('C18', '=-G6', currency_fmt, value=-deg_total)
     ws_dash.write('D18', '-', text_fmt)
 
     ws_dash.write('B19', 'NET MERCHANT OPERATING REVENUE', bold_fmt)
-    ws_dash.write_formula('C19', '=C17+C18', currency_bold, value=float(metrics.get('Total Net Merchant Revenue ($)', 0.0)))
+    ws_dash.write_formula('C19', '=C17+C18', currency_bold, value=net_operating_total)
     ws_dash.write('D19', '-', text_fmt)
 
     # TABLE 2: MONTHLY BREAKDOWN TABLE (Rows 22-35)
@@ -364,18 +372,19 @@ def export_bess_dashboard_excel(
     
     for m_idx, m_name in enumerate(months, start=1):
         r_m = 22 + m_idx
-        m_start = f'{year_val}-{m_idx:02d}-01 00:00'
         if m_idx == 12:
-            m_end = f'{year_val+1}-01-01 00:00'
+            end_year = year_val + 1
+            end_m = 1
         else:
-            m_end = f'{year_val}-{m_idx+1:02d}-01 00:00'
+            end_year = year_val
+            end_m = m_idx + 1
             
         ws_dash.write(f'B{r_m}', m_name, text_fmt)
-        ws_dash.write_formula(f'C{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_ene_ltr}:{col_ene_ltr}, '8760_Dispatch_Results'!A:A, \">={m_start}\", '8760_Dispatch_Results'!A:A, \"<{m_end}\")", currency_fmt)
-        ws_dash.write_formula(f'D{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_reg_ltr}:{col_reg_ltr}, '8760_Dispatch_Results'!A:A, \">={m_start}\", '8760_Dispatch_Results'!A:A, \"<{m_end}\")", currency_fmt)
-        ws_dash.write_formula(f'E{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_cap_ltr}:{col_cap_ltr}, '8760_Dispatch_Results'!A:A, \">={m_start}\", '8760_Dispatch_Results'!A:A, \"<{m_end}\")", currency_fmt)
-        ws_dash.write_formula(f'F{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_syn_ltr}:{col_syn_ltr}, '8760_Dispatch_Results'!A:A, \">={m_start}\", '8760_Dispatch_Results'!A:A, \"<{m_end}\")", currency_fmt)
-        ws_dash.write_formula(f'G{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_net_ltr}:{col_net_ltr}, '8760_Dispatch_Results'!A:A, \">={m_start}\", '8760_Dispatch_Results'!A:A, \"<{m_end}\")", currency_bold)
+        ws_dash.write_formula(f'C{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_ene_ltr}:{col_ene_ltr}, '8760_Dispatch_Results'!A:A, \">=\"&DATE({year_val},{m_idx},1), '8760_Dispatch_Results'!A:A, \"<\"&DATE({end_year},{end_m},1))", currency_fmt)
+        ws_dash.write_formula(f'D{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_reg_ltr}:{col_reg_ltr}, '8760_Dispatch_Results'!A:A, \">=\"&DATE({year_val},{m_idx},1), '8760_Dispatch_Results'!A:A, \"<\"&DATE({end_year},{end_m},1))", currency_fmt)
+        ws_dash.write_formula(f'E{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_cap_ltr}:{col_cap_ltr}, '8760_Dispatch_Results'!A:A, \">=\"&DATE({year_val},{m_idx},1), '8760_Dispatch_Results'!A:A, \"<\"&DATE({end_year},{end_m},1))", currency_fmt)
+        ws_dash.write_formula(f'F{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_syn_ltr}:{col_syn_ltr}, '8760_Dispatch_Results'!A:A, \">=\"&DATE({year_val},{m_idx},1), '8760_Dispatch_Results'!A:A, \"<\"&DATE({end_year},{end_m},1))", currency_fmt)
+        ws_dash.write_formula(f'G{r_m}', f"=SUMIFS('8760_Dispatch_Results'!{col_net_ltr}:{col_net_ltr}, '8760_Dispatch_Results'!A:A, \">=\"&DATE({year_val},{m_idx},1), '8760_Dispatch_Results'!A:A, \"<\"&DATE({end_year},{end_m},1))", currency_bold)
 
     ws_dash.write('B35', 'Full Year Total', bold_fmt)
     ws_dash.write_formula('C35', '=SUM(C23:C34)', currency_bold)

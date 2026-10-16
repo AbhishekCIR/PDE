@@ -43,14 +43,14 @@ elif selected_market == "MISO":
     elcc_default = 0.50
     cap_price_default = 50.0
 elif selected_market == "PJM":
-    elcc_default = 0.50
-    cap_price_default = 329.17
+    elcc_default = 0.37
+    cap_price_default = 131.57
 else:
     elcc_default = 1.00
     cap_price_default = 0.0
 
-elcc_factor = st.sidebar.slider("ELCC Capacity Credit Factor", min_value=0.0, max_value=1.0, value=elcc_default, step=0.05, help="Derating fraction for Capacity Market revenue.")
-capacity_price_mw_day = st.sidebar.number_input("Capacity Price ($/MW-day)", min_value=0.0, value=cap_price_default, step=10.0, help="Capacity price for MISO/PJM calculations.")
+elcc_factor = st.sidebar.slider("ELCC Capacity Credit Factor", min_value=0.0, max_value=1.0, value=elcc_default, step=0.01, help="Derating fraction for Capacity Market revenue.")
+capacity_price_mw_day = st.sidebar.number_input("Capacity Price ($/MW-day)", min_value=0.0, value=cap_price_default, step=0.01, help="Capacity price for MISO/PJM calculations.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🔋 Battery Specifications")
