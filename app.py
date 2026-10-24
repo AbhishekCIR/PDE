@@ -10,6 +10,7 @@ from market_generic import Generic_Optimizer
 from market_ercot import ERCOT_Optimizer
 from market_miso import MISO_Optimizer
 from market_pjm import PJM_Optimizer
+from market_isone import ISONE_Optimizer
 
 from data_adapters.base_adapter import BaseDataAdapter
 from data_adapters.ercot_adapter import ERCOTDataAdapter
@@ -29,7 +30,7 @@ Co-optimize energy arbitrage and ancillary service awards dynamically using Mixe
 
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.header("🌍 Market Selection")
-market_options = ["Generic", "ERCOT", "MISO", "PJM"]
+market_options = ["Generic", "ERCOT", "MISO", "PJM", "ISO-NE"]
 selected_market = st.sidebar.selectbox("Select Market", options=market_options, index=3)
 
 # Advanced Configuration Parameters per Market
@@ -45,24 +46,69 @@ elif selected_market == "MISO":
 elif selected_market == "PJM":
     elcc_default = 0.37
     cap_price_default = 131.57
+elif selected_market == "ISO-NE":
+    elcc_default = 0.50
+    cap_price_default = 0.0  # ISO-NE uses $/kW-month FCM in its own sidebar block
 else:
     elcc_default = 1.00
     cap_price_default = 0.0
 
 elcc_factor = st.sidebar.slider("ELCC Capacity Credit Factor", min_value=0.0, max_value=1.0, value=elcc_default, step=0.01, help="Derating fraction for Capacity Market revenue.")
-capacity_price_mw_day = st.sidebar.number_input("Capacity Price ($/MW-day)", min_value=0.0, value=cap_price_default, step=0.01, help="Capacity price for MISO/PJM calculations.")
+capacity_price_mw_day = 0.0
+capacity_price_kw_month = 3.50
+if selected_market != "ISO-NE":
+    capacity_price_mw_day = st.sidebar.number_input("Capacity Price ($/MW-day)", min_value=0.0, value=cap_price_default, step=0.01, help="Capacity price for MISO/PJM calculations.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🔋 Battery Specifications")
-default_power = 250.0 if selected_market == "PJM" else 100.0
-power_mw = st.sidebar.number_input("Power Capacity (MW)", min_value=1.0, value=default_power, step=10.0)
-duration_hr = st.sidebar.number_input("Duration (Hours)", min_value=1.0, value=4.0, step=1.0)
+if selected_market == "PJM":
+    default_power = 250.0
+    default_duration = 4.0
+elif selected_market == "ISO-NE":
+    default_power = 4.5
+    default_duration = 3.0
+else:
+    default_power = 100.0
+    default_duration = 4.0
+power_mw = st.sidebar.number_input("Power Capacity (MW)", min_value=0.1, value=default_power, step=0.5 if selected_market == "ISO-NE" else 10.0)
+duration_hr = st.sidebar.number_input("Duration (Hours)", min_value=0.5, value=default_duration, step=0.5 if selected_market == "ISO-NE" else 1.0)
 rte = st.sidebar.slider("Round Trip Efficiency (RTE)", min_value=0.50, max_value=1.00, value=0.88, step=0.01)
 max_cycles_per_day = st.sidebar.number_input("Max Cycles per Day", min_value=0.1, value=1.2, step=0.1)
 initial_soc_pct = st.sidebar.slider("Initial SoC (%)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
 deg_cost = st.sidebar.number_input("Degradation Cost ($/MWh Discharged)", min_value=0.0, value=5.0, step=0.5)
 mileage_factor = st.sidebar.slider("Regulation Mileage Wear Factor", min_value=0.01, max_value=0.50, value=0.10, step=0.01, help="Fraction of regulation capacity translating to cycle wear.")
 reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", min_value=0.00, max_value=0.50, value=0.15, step=0.01, help="Approximate expected energy throughput (MWh) per cleared MW of regulation capacity per hour.")
+
+# ISO-NE / WDT parameters
+enable_reserves = True
+apply_wdt_charges = True
+isone_reg_cap_pct = 20.0
+if selected_market == "ISO-NE":
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔌 ISO-NE / WDT Parameters")
+    capacity_price_kw_month = st.sidebar.number_input(
+        "FCM Price ($/kW-month)", min_value=0.0, value=3.50, step=0.10,
+        help="ISO-NE Forward Capacity Market clearing price."
+    )
+    elcc_factor = st.sidebar.slider(
+        "Battery ELCC Factor", min_value=0.0, max_value=1.0, value=0.50, step=0.05,
+        help="Effective Load Carrying Capability derate for FCM credit."
+    )
+    isone_reg_cap_pct = st.sidebar.slider(
+        "Regulation Capacity (%)", min_value=0.0, max_value=50.0, value=20.0, step=1.0
+    )
+    enable_reserves = st.sidebar.checkbox("Enable Spinning/Non-Spin Reserves", value=True)
+    apply_wdt_charges = st.sidebar.checkbox(
+        "Apply WDT Demand Charges (RI Energy Tariff No. 3)", value=True,
+        help="Narragansett Electric Wholesale Distribution Tariff demand charges + hard on-peak no-charge constraint."
+    )
+    mileage_factor = st.sidebar.number_input("Regulation Mileage Factor", min_value=0.0, value=0.10, step=0.01)
+    st.sidebar.caption(
+        "⚠️ On-peak (weekdays 14:00–19:00): charging is **hard-blocked** when WDT is enabled "
+        f"(${ISONE_Optimizer.ONPEAK_RATE}/kW-month)."
+    )
+    # Convert FCM $/kW-month → approx $/MW-day for Excel export compatibility
+    capacity_price_mw_day = capacity_price_kw_month * 1000.0 / 30.44
 
 # PJM-Specific Regulation Safeguards & Variable Tranche Configuration
 pjm_user_tranches = []
@@ -197,6 +243,8 @@ elif selected_market == "MISO":
     required_cols_msg = "`timestamp`, `LMP`, `REG_CAP`, `REG_MIL`, `SPIN`, `SUPP`"
 elif selected_market == "PJM":
     required_cols_msg = "`timestamp`, `LMP`, `RMCCP`, `RMPCP`, `Mileage`, `Price_SYNCH`, `Price_NONSYNCH` (or `Reg_Price` / `Reg_Effective_Price`)"
+elif selected_market == "ISO-NE":
+    required_cols_msg = "`timestamp`, `LMP`, `Charge_LMP`, `Price_RegUp`, `Price_RegDn`, `Price_Reg_Service`, `Price_Spin`, `Price_NonSpin` (15-min preferred; hourly auto-upsampled)"
 else:
     required_cols_msg = "`timestamp`, `LMP`, `Reg_Price`"
 
@@ -271,13 +319,62 @@ if uploaded_file is not None:
             adapter = MISODataAdapter()
         elif selected_market == "PJM":
             adapter = PJMDataAdapter()
+        elif selected_market == "ISO-NE":
+            # Preserve native 15-min resolution (BaseDataAdapter reindexes to hourly)
+            adapter = None
         else:
             adapter = BaseDataAdapter('Generic', ['LMP', 'Reg_Price'], {
                 'LMP': ['LMP', 'lmp', 'price'],
                 'Reg_Price': ['Reg_Price', 'reg_price', 'regulation']
             })
-            
-        df_clean, logs = adapter.process(uploaded_file)
+
+        if selected_market == "ISO-NE":
+            logs = []
+            name = uploaded_file.name.lower()
+            if name.endswith('.csv'):
+                df_raw = pd.read_csv(uploaded_file)
+            else:
+                df_raw = pd.read_excel(uploaded_file)
+            # Case-insensitive column rename
+            col_map = {c.strip().lower(): c for c in df_raw.columns}
+            rename = {}
+            alias_map = {
+                'timestamp': ['timestamp', 'datetime', 'date_time', 'time'],
+                'LMP': ['lmp', 'da_lmp', 'price'],
+                'Charge_LMP': ['charge_lmp', 'rt_lmp'],
+                'Price_RegUp': ['price_regup', 'regup'],
+                'Price_RegDn': ['price_regdn', 'regdn'],
+                'Price_Reg_Service': ['price_reg_service', 'reg_service', 'regmileage'],
+                'Price_Spin': ['price_spin', 'spin', 'tmsr'],
+                'Price_NonSpin': ['price_nonspin', 'nonspin', 'tmnsr'],
+            }
+            for std, aliases in alias_map.items():
+                for a in aliases:
+                    if a in col_map:
+                        rename[col_map[a]] = std
+                        break
+            df_clean = df_raw.rename(columns=rename)
+            if 'timestamp' not in df_clean.columns:
+                raise ValueError("ISO-NE upload requires a timestamp column.")
+            if 'LMP' not in df_clean.columns:
+                raise ValueError("ISO-NE upload requires an LMP column.")
+            df_clean['timestamp'] = pd.to_datetime(df_clean['timestamp'])
+            df_clean = df_clean.sort_values('timestamp').drop_duplicates('timestamp').reset_index(drop=True)
+            if 'Charge_LMP' not in df_clean.columns:
+                df_clean['Charge_LMP'] = df_clean['LMP']
+                logs.append("Charge_LMP missing — defaulted to LMP")
+            for col in ['Price_RegUp', 'Price_RegDn', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']:
+                if col not in df_clean.columns:
+                    df_clean[col] = 0.0
+                    logs.append(f"Filled missing column {col} with 0.0")
+            keep = ['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_RegDn',
+                    'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']
+            if 'CAP_LIMIT' in df_clean.columns:
+                keep.append('CAP_LIMIT')
+            df_clean = df_clean[keep].copy()
+            logs.append(f"Loaded {len(df_clean)} intervals (native resolution preserved for WDT).")
+        else:
+            df_clean, logs = adapter.process(uploaded_file)
         
         st.session_state['data_df'] = df_clean
         st.session_state['data_source'] = f"Uploaded File ({uploaded_file.name})"
@@ -301,14 +398,27 @@ else:
                 opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct, max_reg_hours_per_day=pjm_max_reg_hours)
             except TypeError:
                 opt = PJM_Optimizer(power_mw=power_mw, enable_tranches=enable_pjm_tranches, tranches=pjm_user_tranches if enable_pjm_tranches else None, reg_cap_pct=pjm_reg_cap_pct)
+        elif selected_market == "ISO-NE":
+            opt = ISONE_Optimizer(
+                power_mw=power_mw,
+                duration_hr=duration_hr,
+                capacity_price_kw_month=capacity_price_kw_month,
+                elcc_factor=elcc_factor,
+                reg_cap_pct=isone_reg_cap_pct,
+                enable_reserves=enable_reserves,
+                apply_wdt_charges=apply_wdt_charges,
+                mileage_factor=mileage_factor,
+            )
         else:
             opt = Generic_Optimizer()
             
-        df_synthetic = opt.generate_sample_data(days=365)
+        # ISO-NE sample data is 15-min; 7 days for quick UI gen, or 365 for others
+        gen_days = 30 if selected_market == "ISO-NE" else 365
+        df_synthetic = opt.generate_sample_data(days=gen_days)
         st.session_state['data_df'] = df_synthetic
         st.session_state['data_source'] = f"Synthetic {selected_market} Data"
         st.session_state['active_market'] = selected_market
-        st.success(f"Generated 1 year of synthetic {selected_market} pricing!")
+        st.success(f"Generated {gen_days} day(s) of synthetic {selected_market} pricing!")
 
 if st.session_state['data_df'] is not None:
     with st.expander("Ingested Hourly Data Preview", expanded=False):
@@ -359,6 +469,23 @@ if st.session_state['data_df'] is not None:
                     except TypeError:
                         pjm_init_kwargs.pop("max_reg_hours_per_day", None)
                         optimizer = PJM_Optimizer(**pjm_init_kwargs)
+                elif selected_market == "ISO-NE":
+                    optimizer = ISONE_Optimizer(
+                        power_mw=power_mw,
+                        duration_hr=duration_hr,
+                        rte=rte,
+                        max_cycles_per_day=max_cycles_per_day,
+                        initial_soc_pct=initial_soc_pct,
+                        degradation_cost_per_mwh=deg_cost,
+                        mileage_factor=mileage_factor,
+                        capacity_price_kw_month=capacity_price_kw_month,
+                        elcc_factor=elcc_factor,
+                        reg_cap_pct=isone_reg_cap_pct,
+                        enable_reserves=enable_reserves,
+                        apply_wdt_charges=apply_wdt_charges,
+                        reg_throughput_factor=reg_throughput_factor,
+                        is_tolling=is_tolling_flag,
+                    )
                 else:
                     optimizer = Generic_Optimizer(
                         power_mw=power_mw, duration_hr=duration_hr, rte=rte,
@@ -373,7 +500,9 @@ if st.session_state['data_df'] is not None:
                 
                 if selected_mode == "Tolling Agreement":
                     data_in['Charge_LMP'] = 0.0
-                else:
+                elif 'Charge_LMP' not in data_in.columns:
+                    data_in['Charge_LMP'] = data_in['LMP']
+                elif selected_market != "ISO-NE":
                     data_in['Charge_LMP'] = data_in['LMP']
                 
                 data_in['CAP_LIMIT'] = power_mw
@@ -411,8 +540,16 @@ if st.session_state['data_df'] is not None:
                 if selected_mode in ["Merchant Only", "Tolling Agreement"]:
                     metrics['Total Net Merchant Revenue ($)'] -= metrics.get('Static Capacity Revenue ($)', 0.0)
                     metrics['Static Capacity Revenue ($)'] = 0.0
+                    if 'Static Capacity Revenue (FCM) ($)' in metrics:
+                        metrics['Static Capacity Revenue (FCM) ($)'] = 0.0
                     df_opt['Capacity_Revenue'] = 0.0
-                    df_opt['revenue'] = df_opt['Energy_Revenue'] + df_opt['Ancillary_Revenue'] - df_opt['Total_Degradation_Cost']
+                    wdt_col = df_opt['WDT_Demand_Cost'] if 'WDT_Demand_Cost' in df_opt.columns else 0.0
+                    df_opt['revenue'] = (
+                        df_opt['Energy_Revenue']
+                        + df_opt['Ancillary_Revenue']
+                        - df_opt['Total_Degradation_Cost']
+                        - wdt_col
+                    )
 
                 # Pre-generate live formula Excel workbook
                 excel_bytes = export_bess_dashboard_excel(
@@ -437,7 +574,9 @@ if st.session_state['data_df'] is not None:
                     'market_name': selected_market,
                     'enable_pjm_tranches': enable_pjm_tranches,
                     'pjm_user_tranches': pjm_user_tranches,
-                    'allow_slicing': pjm_allow_slicing
+                    'allow_slicing': pjm_allow_slicing,
+                    'apply_wdt_charges': apply_wdt_charges if selected_market == "ISO-NE" else False,
+                    'optimizer_wdt': getattr(optimizer, '_wdt_monthly_df', None),
                 }
                 st.success("Optimization Solved Successfully! Detailed results and download options are displayed below.")
                 
@@ -516,6 +655,21 @@ if st.session_state.get('opt_results') is not None:
                     value=f"${tot_rev:,.2f}",
                     delta=f"Avg Cleared: {avg_cleared:.1f} MW"
                 )
+
+    # ISO-NE WDT Demand Charge Breakdown
+    if market_res_name == "ISO-NE" and res.get('apply_wdt_charges', False):
+        st.markdown("---")
+        st.subheader("🔌 WDT Demand Charge Breakdown (Narragansett Electric Tariff No. 3)")
+        wdt_df = res.get('optimizer_wdt')
+        if wdt_df is None or (hasattr(wdt_df, 'empty') and wdt_df.empty):
+            # Recompute from dispatch if not stored
+            tmp_opt = ISONE_Optimizer()
+            wdt_df = tmp_opt.calculate_wdt_demand_charges(df_opt)
+        st.dataframe(wdt_df, use_container_width=True)
+        wdt_total = metrics.get('WDT Annual Demand Charges ($)', wdt_df['WDT_Demand_Charge'].sum() if wdt_df is not None and len(wdt_df) else 0.0)
+        c_w1, c_w2 = st.columns(2)
+        c_w1.metric("Total WDT Demand Charges", f"${wdt_total:,.2f}")
+        c_w2.metric("On-Peak Charging Hours", f"{metrics.get('On-Peak Charging Hours', 0):.2f} (must be 0)")
 
     # Charts
     st.markdown("---")

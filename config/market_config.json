@@ -39,5 +39,23 @@
       "RegD": 0.95
     },
     "elcc_factor": 0.30
+  },
+  "ISO-NE": {
+    "market_version": "2026.01",
+    "reserve_durations": {
+      "Reg": 0.5,
+      "Spin": 0.5,
+      "NonSpin": 0.5
+    },
+    "default_mileage_factor": 0.10,
+    "elcc_factor": 0.50,
+    "wdt_tariff": {
+      "onpeak_rate_kw_month": 10.55,
+      "midpeak_rate_kw_month": 1.35,
+      "offpeak_rate_kw_month": 0.53,
+      "customer_charge_month": 32.82,
+      "utility": "Narragansett Electric / Rhode Island Energy",
+      "tariff": "Electric Tariff No. 3"
+    }
   }
 }
