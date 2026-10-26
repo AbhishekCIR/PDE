@@ -114,7 +114,8 @@ class BESS_Simulator_Base:
         if forecast_engine is not None:
             # Setup history tracker (we index by timestamp)
             df_history = df.set_index('timestamp')
-            step_size = max(1, int(rolling_step_hrs))
+            step_size = max(1, int(round(rolling_step_hrs / timestep_hours)))
+            horizon_steps = max(1, int(round(forecast_horizon_hrs / timestep_hours)))
             
             t = 0
             with tqdm(total=T_total, desc=f'Solving Rolling Horizon ({self.market_name})') as pbar:
@@ -129,7 +130,7 @@ class BESS_Simulator_Base:
                     if len(hist_subset) == 0:
                         hist_subset = pd.DataFrame(columns=[c for c in df.columns if c != 'timestamp'], index=pd.DatetimeIndex([]))
                         
-                    future_actuals = df.iloc[t:t+forecast_horizon_hrs].set_index('timestamp')
+                    future_actuals = df.iloc[t:t+horizon_steps].set_index('timestamp')
                     
                     forecast_df = forecast_engine.generate_forecast(
                         df_history=hist_subset,
@@ -160,6 +161,9 @@ class BESS_Simulator_Base:
                     subclass_vars = self.define_market_variables(prob, T_window)
                     subclass_vars['u_c'] = u_c
                     subclass_vars['u_d'] = u_d
+                    if 'timestamp' not in forecast_df.columns:
+                        if isinstance(forecast_df.index, pd.DatetimeIndex) or forecast_df.index.name == 'timestamp':
+                            forecast_df['timestamp'] = forecast_df.index
                     self.current_df = forecast_df
                     
                     # Objective formulation: Energy Arbitrage + AS cleared revenues - degradation cost - infeasibility penalties

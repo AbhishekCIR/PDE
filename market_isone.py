@@ -167,6 +167,9 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         are computed on true 15-min charging decisions.
         """
         df = df.copy()
+        if "timestamp" not in df.columns:
+            if isinstance(df.index, pd.DatetimeIndex) or df.index.name == "timestamp":
+                df = df.reset_index().rename(columns={"index": "timestamp"})
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df.sort_values("timestamp").reset_index(drop=True)
 
@@ -311,13 +314,16 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         spin = subclass_vars["spin"]
         nonspin = subclass_vars["nonspin"]
 
-        # Timestamps from current day window (set by base class)
-        if hasattr(self, "current_df") and self.current_df is not None:
-            timestamps = pd.to_datetime(self.current_df["timestamp"].values)
-        elif "timestamp" in df_prices.columns:
-            timestamps = pd.to_datetime(df_prices["timestamp"].values)
-        else:
-            timestamps = None
+        # Timestamps from current day window or rolling forecast (handles both column and DatetimeIndex)
+        timestamps = None
+        for candidate in [getattr(self, "current_df", None), df_prices]:
+            if candidate is not None:
+                if "timestamp" in candidate.columns:
+                    timestamps = pd.to_datetime(candidate["timestamp"].values)
+                    break
+                elif isinstance(candidate.index, pd.DatetimeIndex) or candidate.index.name == "timestamp":
+                    timestamps = pd.to_datetime(candidate.index.values)
+                    break
 
         dur_spin = self.config.get("reserve_durations", {}).get("Spin", 0.50)
         dur_nonspin = self.config.get("reserve_durations", {}).get("NonSpin", 0.50)
