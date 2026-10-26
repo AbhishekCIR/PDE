@@ -160,7 +160,8 @@ def export_bess_dashboard_excel(
         elif 'Reg_Effective_Price' in df_results.columns:
             reg_p_val = float(df_results['Reg_Effective_Price'].iloc[i])
         elif 'RMCCP_D' in df_results.columns:
-            reg_p_val = float(df_results['RMCCP_D'].iloc[i] * 0.95 + df_results.get('RMPCP_D', pd.Series([2.5])).iloc[i] * 3.2 * 0.95)
+            rmpcp_d = float(df_results['RMPCP_D'].iloc[i]) if 'RMPCP_D' in df_results.columns else 2.5
+            reg_p_val = float(df_results['RMCCP_D'].iloc[i] * 0.95 + rmpcp_d * 3.2 * 0.95)
         elif 'RMCCP' in df_results.columns:
             mileage = float(df_results['Mileage'].iloc[i]) if 'Mileage' in df_results.columns else 3.2
             rmpcp = float(df_results['RMPCP'].iloc[i]) if 'RMPCP' in df_results.columns else 2.5
@@ -168,7 +169,12 @@ def export_bess_dashboard_excel(
         else:
             reg_p_val = 30.0
             
-        synch_p_val = float(df_results['Price_SYNCH'].iloc[i]) if 'Price_SYNCH' in df_results.columns else 4.0
+        if 'Price_SYNCH' in df_results.columns:
+            synch_p_val = float(df_results['Price_SYNCH'].iloc[i])
+        elif 'Price_Spin' in df_results.columns:
+            synch_p_val = float(df_results['Price_Spin'].iloc[i])
+        else:
+            synch_p_val = 4.0
         
         if 'Charge_MW' in df_results.columns:
             c_val = float(df_results['Charge_MW'].iloc[i])
@@ -203,10 +209,22 @@ def export_bess_dashboard_excel(
             tot_reg_val = float(df_results['Total_Reg_MW'].iloc[i]) if 'Total_Reg_MW' in df_results.columns else (float(df_results['Regulation_MW'].iloc[i]) if 'Regulation_MW' in df_results.columns else 0.0)
             ws_disp.write_number(i+1, header_col_map['Total_Reg_MW'], tot_reg_val, num_fmt)
             
-        synch_val = float(df_results['Synch_MW'].iloc[i]) if 'Synch_MW' in df_results.columns else float(df_results.get('SYNCH_MW', pd.Series([0])).iloc[i])
+        if 'Synch_MW' in df_results.columns:
+            synch_val = float(df_results['Synch_MW'].iloc[i])
+        elif 'SYNCH_MW' in df_results.columns:
+            synch_val = float(df_results['SYNCH_MW'].iloc[i])
+        elif 'Spin_MW' in df_results.columns:
+            synch_val = float(df_results['Spin_MW'].iloc[i])
+        else:
+            synch_val = 0.0
         ws_disp.write_number(i+1, header_col_map['Synch_MW'], synch_val, num_fmt)
         
-        soc_val = float(df_results['SOC_MWh'].iloc[i]) if 'SOC_MWh' in df_results.columns else float(df_results.get('soc_mwh', pd.Series([0])).iloc[i])
+        if 'SOC_MWh' in df_results.columns:
+            soc_val = float(df_results['SOC_MWh'].iloc[i])
+        elif 'soc_mwh' in df_results.columns:
+            soc_val = float(df_results['soc_mwh'].iloc[i])
+        else:
+            soc_val = 0.0
         ws_disp.write_number(i+1, header_col_map['SOC_MWh'], soc_val, num_fmt)
         
         # LIVE FORMULA: SOC Pct
@@ -230,7 +248,12 @@ def export_bess_dashboard_excel(
             ws_disp.write_formula(i+1, header_col_map['Regulation_Revenue'], f'={col_tot_reg}{r}*{col_reg_p}{r}', currency_fmt, value=reg_val)
             
         # LIVE FORMULA: Synch Revenue
-        synch_rev_val = float(df_results['SYNCH_Revenue'].iloc[i]) if 'SYNCH_Revenue' in df_results.columns else (synch_val * synch_p_val)
+        if 'SYNCH_Revenue' in df_results.columns:
+            synch_rev_val = float(df_results['SYNCH_Revenue'].iloc[i])
+        elif 'Spin_Revenue' in df_results.columns:
+            synch_rev_val = float(df_results['Spin_Revenue'].iloc[i])
+        else:
+            synch_rev_val = synch_val * synch_p_val
         ws_disp.write_formula(i+1, header_col_map['SYNCH_Revenue'], f'={col_synch}{r}*{col_synch_p}{r}', currency_fmt, value=synch_rev_val)
         
         # LIVE FORMULA: Capacity Revenue
@@ -253,7 +276,12 @@ def export_bess_dashboard_excel(
         ws_disp.write_formula(i+1, header_col_map['Net_Merchant_Revenue'], f'={col_e_rev}{r}+{col_r_rev}{r}+{col_s_rev}{r}+{col_cap_rev}{r}-{col_deg}{r}', currency_fmt, value=net_val)
         
         # Mode string
-        mode_str = str(df_results['Operating_Mode'].iloc[i] if 'Operating_Mode' in df_results.columns else df_results.get('decision', pd.Series(['Active'])).iloc[i])
+        if 'Operating_Mode' in df_results.columns:
+            mode_str = str(df_results['Operating_Mode'].iloc[i])
+        elif 'decision' in df_results.columns:
+            mode_str = str(df_results['decision'].iloc[i])
+        else:
+            mode_str = 'Active'
         ws_disp.write(i+1, header_col_map['Operating_Mode'], mode_str, text_fmt)
 
     # =========================================================
