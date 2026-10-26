@@ -6,11 +6,32 @@ import io
 import os
 import altair as altair
 
+import importlib
+import sys
+
+# Force fresh reload of sub-modules to eliminate Streamlit Cloud cache desync
+for mod_name in ['market_isone', 'market_pjm', 'market_ercot', 'market_miso', 'excel_dashboard_generator']:
+    if mod_name in sys.modules:
+        try:
+            importlib.reload(sys.modules[mod_name])
+        except Exception:
+            pass
+
 from market_generic import Generic_Optimizer
 from market_ercot import ERCOT_Optimizer
 from market_miso import MISO_Optimizer
 from market_pjm import PJM_Optimizer
 from market_isone import ISONE_Optimizer
+
+def compute_mri_accreditation(dur_hr: float) -> float:
+    """Marginal Reliability Impact (MRI) accreditation curve for ISO-NE BESS."""
+    durations = [2.0, 3.0, 4.0, 6.0, 8.0]
+    factors = [0.22, 0.31, 0.40, 0.68, 0.85]
+    if dur_hr <= durations[0]:
+        return factors[0]
+    if dur_hr >= durations[-1]:
+        return factors[-1]
+    return float(np.interp(dur_hr, durations, factors))
 
 from data_adapters.base_adapter import BaseDataAdapter
 from data_adapters.ercot_adapter import ERCOTDataAdapter
@@ -100,8 +121,11 @@ if selected_market == "ISO-NE":
         help="ISO-NE Capacity Auction Reform (CAR) moves from 12-month annual contracts to separate Summer (May-Oct) and Winter (Nov-Apr) prompt seasonal auctions."
     )
 
-    # Suggested MRI accreditation based on duration
-    suggested_mri = ISONE_Optimizer.get_mri_accreditation(duration_hr)
+    # Suggested MRI accreditation based on duration (safe against hot-reload cache)
+    if hasattr(ISONE_Optimizer, "get_mri_accreditation"):
+        suggested_mri = ISONE_Optimizer.get_mri_accreditation(duration_hr)
+    else:
+        suggested_mri = compute_mri_accreditation(duration_hr)
     elcc_factor = st.sidebar.slider(
         "Battery Accreditation Factor (MRI / ELCC)",
         min_value=0.05, max_value=1.0, value=float(suggested_mri), step=0.01,
