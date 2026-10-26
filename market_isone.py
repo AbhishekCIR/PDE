@@ -43,6 +43,25 @@ class ISONE_Optimizer(BESS_Simulator_Base):
     CUSTOMER_CHARGE = 32.82  # $/month
     DAYS_PER_MONTH = 30.44   # average for $/kW-month → hourly conversion
 
+    @staticmethod
+    def get_mri_accreditation(duration_hr: float) -> float:
+        """
+        ISO-NE Capacity Auction Reform (CAR 2028+) Marginal Reliability Impact (MRI)
+        duration-based accreditation factor for BESS:
+          - 2-hr: ~22%
+          - 3-hr: ~31%
+          - 4-hr: ~40%
+          - 6-hr: ~68%
+          - 8-hr+: ~85%
+        """
+        durations = [2.0, 3.0, 4.0, 6.0, 8.0]
+        factors = [0.22, 0.31, 0.40, 0.68, 0.85]
+        if duration_hr <= durations[0]:
+            return factors[0]
+        if duration_hr >= durations[-1]:
+            return factors[-1]
+        return float(np.interp(duration_hr, durations, factors))
+
     def __init__(
         self,
         power_mw: float = 4.5,
@@ -55,10 +74,16 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         capacity_price_kw_month: float = 3.50,
         reg_throughput_factor: float = 0.15,
         is_tolling: bool = False,
-        elcc_factor: float = 0.50,
+        elcc_factor: float = None,
         reg_cap_pct: float = 20.0,
         enable_reserves: bool = True,
         apply_wdt_charges: bool = True,
+        # CAR 2028+ Reform & Seasonal Parameters
+        capacity_pricing_mode: str = "Seasonal",  # "Seasonal" or "Annual Flat"
+        summer_capacity_price_kw_month: float = 4.50,
+        winter_capacity_price_kw_month: float = 2.50,
+        enable_pfp_protection: bool = True,
+        pfp_min_soc_pct: float = 0.15,
         **kwargs
     ):
         super().__init__(
@@ -74,14 +99,42 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             is_tolling=is_tolling,
         )
 
+        self.capacity_pricing_mode = str(
+            kwargs.get("capacity_pricing_mode", capacity_pricing_mode)
+        )
+        self.summer_capacity_price_kw_month = float(
+            kwargs.get("summer_capacity_price_kw_month", summer_capacity_price_kw_month)
+        )
+        self.winter_capacity_price_kw_month = float(
+            kwargs.get("winter_capacity_price_kw_month", winter_capacity_price_kw_month)
+        )
         self.capacity_price_kw_month = float(
             kwargs.get("capacity_price_kw_month", capacity_price_kw_month)
         )
-        # Approx $/MW-day for dashboard compatibility with other markets
-        self.capacity_price_mw_day = (
-            self.capacity_price_kw_month * 1000.0 / self.DAYS_PER_MONTH
+        
+        # If elcc_factor is not specified, derive from MRI accreditation curve
+        raw_elcc = kwargs.get("elcc_factor", elcc_factor)
+        if raw_elcc is None:
+            self.elcc_factor = self.get_mri_accreditation(self.duration_hr)
+        else:
+            self.elcc_factor = float(raw_elcc)
+        self.config["elcc_factor"] = self.elcc_factor
+
+        self.enable_pfp_protection = bool(
+            kwargs.get("enable_pfp_protection", enable_pfp_protection)
         )
-        self.elcc_factor = float(kwargs.get("elcc_factor", elcc_factor))
+        self.pfp_min_soc_pct = float(
+            kwargs.get("pfp_min_soc_pct", pfp_min_soc_pct)
+        )
+
+        # Weighted $/MW-day for dashboard compatibility with other markets
+        if self.capacity_pricing_mode == "Seasonal":
+            avg_monthly = (self.summer_capacity_price_kw_month * 6.0 + self.winter_capacity_price_kw_month * 6.0) / 12.0
+            self.capacity_price_mw_day = avg_monthly * 1000.0 / self.DAYS_PER_MONTH
+        else:
+            self.capacity_price_mw_day = (
+                self.capacity_price_kw_month * 1000.0 / self.DAYS_PER_MONTH
+            )
         self.reg_cap_pct = float(kwargs.get("reg_cap_pct", reg_cap_pct))
         self.enable_reserves = bool(kwargs.get("enable_reserves", enable_reserves))
         self.apply_wdt_charges = bool(kwargs.get("apply_wdt_charges", apply_wdt_charges))
@@ -348,7 +401,18 @@ class ISONE_Optimizer(BESS_Simulator_Base):
                 + spin[t] * dur_spin
                 + nonspin[t] * dur_nonspin
             )
-            prob += soc[t] >= (0.10 * self.energy_mwh) + as_energy * timestep_hours
+
+            # Pay-for-Performance (PfP) Scarcity Safeguard ($9,337/MWh scarcity penalty protection):
+            # During peak risk hours (weekdays 12:00 - 20:00), maintain an emergency SoC buffer
+            # (default 15% SoC) so the asset never sits empty during an ISO-NE Capacity Scarcity Condition (CSC).
+            ts_t = pd.Timestamp(timestamps[t]) if (timestamps is not None and t < len(timestamps)) else None
+            is_pfp_risk = False
+            if ts_t is not None:
+                if ts_t.weekday() < 5 and (12 <= ts_t.hour < 20):
+                    is_pfp_risk = True
+
+            target_floor_pct = self.pfp_min_soc_pct if (self.enable_pfp_protection and is_pfp_risk) else 0.10
+            prob += soc[t] >= (target_floor_pct * self.energy_mwh) + as_energy * timestep_hours
             prob += soc[t] <= (0.90 * self.energy_mwh) - (
                 (reg_up[t] + reg_dn[t]) * dur_reg * timestep_hours
             )
@@ -535,12 +599,28 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         df_out["Total_Degradation_Cost"] = energy_deg + reg_deg
 
         # FCM: flat $/hr from ELCC-derated capacity × $/kW-month
+        # FCM: Capacity revenue with CAR 2028+ Seasonal split
         elcc = self.config.get("elcc_factor", self.elcc_factor)
         effective_mw = self.power_mw * elcc
-        hourly_capacity_revenue = (
-            effective_mw * self.capacity_price_kw_month * 1000.0
-        ) / (self.DAYS_PER_MONTH * 24.0)
-        df_out["Capacity_Revenue"] = hourly_capacity_revenue * timestep_hours
+        months = df_out["timestamp"].dt.month
+        # Summer is May 1 - Oct 31 (months 5, 6, 7, 8, 9, 10)
+        is_summer = months.isin([5, 6, 7, 8, 9, 10])
+
+        if self.capacity_pricing_mode == "Seasonal":
+            seasonal_rate = np.where(is_summer, self.summer_capacity_price_kw_month, self.winter_capacity_price_kw_month)
+            hourly_capacity_revenue = (
+                effective_mw * seasonal_rate * 1000.0
+            ) / (self.DAYS_PER_MONTH * 24.0)
+            df_out["Capacity_Revenue"] = hourly_capacity_revenue * timestep_hours
+            df_out["Summer_Capacity_Revenue"] = np.where(is_summer, df_out["Capacity_Revenue"], 0.0)
+            df_out["Winter_Capacity_Revenue"] = np.where(~is_summer, df_out["Capacity_Revenue"], 0.0)
+        else:
+            hourly_capacity_revenue = (
+                effective_mw * self.capacity_price_kw_month * 1000.0
+            ) / (self.DAYS_PER_MONTH * 24.0)
+            df_out["Capacity_Revenue"] = hourly_capacity_revenue * timestep_hours
+            df_out["Summer_Capacity_Revenue"] = np.where(is_summer, df_out["Capacity_Revenue"], 0.0)
+            df_out["Winter_Capacity_Revenue"] = np.where(~is_summer, df_out["Capacity_Revenue"], 0.0)
 
         # WDT demand charges (monthly peaks → prorated per interval)
         if self.apply_wdt_charges:
@@ -638,6 +718,10 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             else {}
         )
 
+        summer_cap_rev = float(df_out["Summer_Capacity_Revenue"].sum()) if "Summer_Capacity_Revenue" in df_out.columns else 0.0
+        winter_cap_rev = float(df_out["Winter_Capacity_Revenue"].sum()) if "Winter_Capacity_Revenue" in df_out.columns else 0.0
+        elcc = self.config.get("elcc_factor", self.elcc_factor)
+
         metrics = {
             "Total Net Merchant Revenue ($)": total_rev,
             "Energy Arbitrage Revenue ($)": energy_rev,
@@ -647,6 +731,11 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             "Non-Spin Reserve Revenue ($)": nonspin_rev,
             "Static Capacity Revenue (FCM) ($)": capacity_rev,
             "Static Capacity Revenue ($)": capacity_rev,  # app.py compatibility
+            "Summer Capacity Revenue ($)": summer_cap_rev,
+            "Winter Capacity Revenue ($)": winter_cap_rev,
+            "Capacity Market Framework": "Seasonal (2028+ CAR Reform)" if self.capacity_pricing_mode == "Seasonal" else "Annual Flat (Pre-2028 Legacy)",
+            "Accreditation Derate (MRI/ELCC)": f"{elcc * 100.0:.1f}%",
+            "PfP Scarcity Safeguard": "Active (15% SoC Buffer)" if self.enable_pfp_protection else "Disabled",
             "WDT Annual Demand Charges ($)": wdt_total,
             "Degradation Expense ($)": deg_expense,
             "Equivalent Full Cycles (EFC)": efc,
@@ -682,10 +771,13 @@ if __name__ == "__main__":
 
     print("\n=== ISO-NE 4.5 MW FTM BESS - 7-DAY OPTIMIZATION METRICS ===")
     for k, v in metrics.items():
-        if "$" in k:
-            print(f"{k:<50}: ${v:>12,.2f}")
+        if isinstance(v, (int, float)):
+            if "$" in k:
+                print(f"{k:<50}: ${v:>12,.2f}")
+            else:
+                print(f"{k:<50}: {v:>12.4f}")
         else:
-            print(f"{k:<50}: {v:>12.4f}")
+            print(f"{k:<50}: {str(v):>12}")
 
     onpeak_charge = df_results[
         (df_results["period"] == "onpeak") & (df_results["charge_mw"] > 1e-3)

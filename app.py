@@ -83,31 +83,71 @@ reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", mi
 enable_reserves = True
 apply_wdt_charges = True
 isone_reg_cap_pct = 20.0
+isone_capacity_mode = "Seasonal (2028+ CAR Reform)"
+summer_capacity_price = 4.50
+winter_capacity_price = 2.50
+enable_pfp_protection = True
+pfp_min_soc_pct = 0.15
+
 if selected_market == "ISO-NE":
     st.sidebar.markdown("---")
-    st.sidebar.header("🔌 ISO-NE / WDT Parameters")
-    capacity_price_kw_month = st.sidebar.number_input(
-        "FCM Price ($/kW-month)", min_value=0.0, value=3.50, step=0.10,
-        help="ISO-NE Forward Capacity Market clearing price."
+    st.sidebar.header("⚡ ISO-NE / WDT Parameters")
+
+    # Capacity Framework Choice (Seasonal 2028+ CAR Reform vs Annual Flat Legacy)
+    isone_capacity_mode = st.sidebar.radio(
+        "Capacity Market Framework",
+        ["Seasonal (2028+ CAR Reform)", "Annual Flat (Pre-2028 Legacy)"],
+        help="ISO-NE Capacity Auction Reform (CAR) moves from 12-month annual contracts to separate Summer (May-Oct) and Winter (Nov-Apr) prompt seasonal auctions."
     )
+
+    # Suggested MRI accreditation based on duration
+    suggested_mri = ISONE_Optimizer.get_mri_accreditation(duration_hr)
     elcc_factor = st.sidebar.slider(
-        "Battery ELCC Factor", min_value=0.0, max_value=1.0, value=0.50, step=0.05,
-        help="Effective Load Carrying Capability derate for FCM credit."
+        "Battery Accreditation Factor (MRI / ELCC)",
+        min_value=0.05, max_value=1.0, value=float(suggested_mri), step=0.01,
+        help=f"Marginal Reliability Impact (MRI) capacity accreditation derating. Suggested for {duration_hr}-hr BESS: ~{suggested_mri*100:.0f}%."
     )
+
+    if isone_capacity_mode.startswith("Seasonal"):
+        col_s1, col_s2 = st.sidebar.columns(2)
+        summer_capacity_price = col_s1.number_input(
+            "Summer ($/kW-mo)", min_value=0.0, value=4.50, step=0.10,
+            help="Summer Peak Capacity clearing price (May 1 – Oct 31)."
+        )
+        winter_capacity_price = col_s2.number_input(
+            "Winter ($/kW-mo)", min_value=0.0, value=2.50, step=0.10,
+            help="Winter Capacity clearing price (Nov 1 – Apr 30)."
+        )
+        capacity_price_kw_month = (summer_capacity_price * 6.0 + winter_capacity_price * 6.0) / 12.0
+    else:
+        capacity_price_kw_month = st.sidebar.number_input(
+            "FCM Price ($/kW-month)", min_value=0.0, value=3.50, step=0.10,
+            help="ISO-NE Forward Capacity Market annual clearing price."
+        )
+        summer_capacity_price = capacity_price_kw_month
+        winter_capacity_price = capacity_price_kw_month
+
+    # Pay-for-Performance (PfP) Scarcity Safeguard
+    enable_pfp_protection = st.sidebar.checkbox(
+        "Enable PfP Scarcity Buffer (15% SoC)",
+        value=True,
+        help="Maintains an emergency 15% State-of-Charge buffer during peak risk hours to prevent catastrophic $9,337/MWh Pay-for-Performance penalties."
+    )
+
     isone_reg_cap_pct = st.sidebar.slider(
         "Regulation Capacity (%)", min_value=0.0, max_value=50.0, value=20.0, step=1.0
     )
     enable_reserves = st.sidebar.checkbox("Enable Spinning/Non-Spin Reserves", value=True)
     apply_wdt_charges = st.sidebar.checkbox(
         "Apply WDT Demand Charges (RI Energy Tariff No. 3)", value=True,
-        help="Narragansett Electric Wholesale Distribution Tariff demand charges + hard on-peak no-charge constraint."
+        help="Narragansett Electric Wholesale Distribution Tariff demand charges + hard on-peak no-charge constraint ($10.55/kW-mo on-peak penalty prevention)."
     )
     mileage_factor = st.sidebar.number_input("Regulation Mileage Factor", min_value=0.0, value=0.10, step=0.01)
     st.sidebar.caption(
-        "⚠️ On-peak (weekdays 14:00–19:00): charging is **hard-blocked** when WDT is enabled "
+        "🚫 **On-peak (weekdays 14:00–19:00):** charging is **hard-blocked** when WDT is enabled "
         f"(${ISONE_Optimizer.ONPEAK_RATE}/kW-month)."
     )
-    # Convert FCM $/kW-month → approx $/MW-day for Excel export compatibility
+    # Convert FCM $/kW-month -> approx $/MW-day for Excel export compatibility
     capacity_price_mw_day = capacity_price_kw_month * 1000.0 / 30.44
 
 # PJM-Specific Regulation Safeguards & Variable Tranche Configuration
@@ -485,6 +525,12 @@ if st.session_state['data_df'] is not None:
                         apply_wdt_charges=apply_wdt_charges,
                         reg_throughput_factor=reg_throughput_factor,
                         is_tolling=is_tolling_flag,
+                        # CAR 2028+ Reform & Seasonal Parameters
+                        capacity_pricing_mode="Seasonal" if isone_capacity_mode.startswith("Seasonal") else "Annual Flat",
+                        summer_capacity_price_kw_month=summer_capacity_price,
+                        winter_capacity_price_kw_month=winter_capacity_price,
+                        enable_pfp_protection=enable_pfp_protection,
+                        pfp_min_soc_pct=0.15,
                     )
                 else:
                     optimizer = Generic_Optimizer(
@@ -670,6 +716,20 @@ if st.session_state.get('opt_results') is not None:
         c_w1, c_w2 = st.columns(2)
         c_w1.metric("Total WDT Demand Charges", f"${wdt_total:,.2f}")
         c_w2.metric("On-Peak Charging Hours", f"{metrics.get('On-Peak Charging Hours', 0):.2f} (must be 0)")
+
+    # ISO-NE Capacity Market Breakdown (CAR 2028+ Reform)
+    if market_res_name == "ISO-NE":
+        st.markdown("---")
+        st.subheader("🏛️ ISO-NE Capacity Market Breakdown (CAR 2028+ Reform)")
+        cap_c1, cap_c2, cap_c3, cap_c4 = st.columns(4)
+        cap_c1.metric("Capacity Framework", metrics.get("Capacity Market Framework", "Seasonal (2028+ CAR Reform)"))
+        cap_c2.metric("MRI Accreditation Derate", metrics.get("Accreditation Derate (MRI/ELCC)", "N/A"))
+        cap_c3.metric("Summer Capacity Revenue", f"${metrics.get('Summer Capacity Revenue ($)', 0.0):,.2f}")
+        cap_c4.metric("Winter Capacity Revenue", f"${metrics.get('Winter Capacity Revenue ($)', 0.0):,.2f}")
+        st.caption(
+            f"🛡️ **Pay-for-Performance (PfP) Safeguard:** {metrics.get('PfP Scarcity Safeguard', 'Active (15% SoC Buffer)')} — "
+            "protects against $9,337/MWh scarcity penalties during high-risk peak hours."
+        )
 
     # Charts
     st.markdown("---")

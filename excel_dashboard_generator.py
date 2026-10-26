@@ -85,14 +85,19 @@ def export_bess_dashboard_excel(
         ('Power_MW', power_mw, 'Rated Inverter Power Capacity (MW)'),
         ('Duration_Hr', duration_hr, 'Storage Duration (Hours)'),
         ('Energy_MWh', power_mw * duration_hr, 'Nameplate Energy Capacity (MWh)'),
-        ('Capacity_Price_MW_Day', capacity_price_mw_day, 'PJM RPM / Capacity Price ($/MW-day)'),
-        ('ELCC_Factor', elcc_factor, 'Marginal ELCC Capacity Derate Factor (0.0 to 1.0)'),
+        ('Capacity_Price_MW_Day', capacity_price_mw_day, 'RPM / Capacity Price ($/MW-day)'),
+        ('ELCC_Factor', elcc_factor, 'Marginal ELCC / MRI Derate Factor (0.0 to 1.0)'),
         ('Degradation_Cost_MWh', deg_cost, 'Cell degradation cost per MWh throughput ($/MWh)'),
         ('Mileage_Factor', mileage_factor, 'Fraction of regulation capacity translating to cycle wear'),
         ('RTE', rte, 'Round-Trip AC-AC Efficiency'),
         ('Eff_C', float(np.sqrt(rte)), 'Square root of RTE (Charging efficiency)'),
         ('Eff_D', float(np.sqrt(rte)), 'Square root of RTE (Discharging efficiency)'),
+        ('Market_Name', market_name, 'Wholesale Electricity Market / ISO'),
     ]
+    if market_name == "ISO-NE":
+        inputs_data.append(('Capacity_Framework', metrics.get('Capacity Market Framework', 'Seasonal (2028+ CAR Reform)'), 'ISO-NE Capacity Market Structure'))
+        inputs_data.append(('PfP_Scarcity_Safeguard', metrics.get('PfP Scarcity Safeguard', 'Active (15% SoC Buffer)'), 'Emergency 15% SoC Buffer against $9,337/MWh penalty'))
+        inputs_data.append(('WDT_Tariff', 'RI Energy Tariff No. 3', 'Wholesale Distribution Tariff (On-Peak No-Charge)'))
     
     for idx, (param, val, desc) in enumerate(inputs_data, start=2):
         ws_in.write(f'A{idx}', param, text_fmt)
@@ -363,7 +368,8 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('C13', '=C6', currency_fmt, value=float(metrics.get('Regulation Revenue ($)', 0.0)))
     ws_dash.write_formula('D13', '=C13/$C$17', pct_fmt)
 
-    ws_dash.write('B14', 'RPM Capacity Market', text_fmt)
+    cap_mkt_title = 'ISO-NE Capacity Market (CAR)' if market_name == "ISO-NE" else ('PJM RPM Capacity Market' if market_name == "PJM" else 'Capacity Market')
+    ws_dash.write('B14', cap_mkt_title, text_fmt)
     ws_dash.write_formula('C14', '=E6', currency_fmt, value=float(metrics.get('Static Capacity Revenue ($)', 0.0)))
     ws_dash.write_formula('D14', '=C14/$C$17', pct_fmt)
 
@@ -371,7 +377,8 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('C15', '=D6', currency_fmt, value=float(metrics.get('Energy Arbitrage Revenue ($)', 0.0)))
     ws_dash.write_formula('D15', '=C15/$C$17', pct_fmt)
 
-    ws_dash.write('B16', 'Synchronized Reserves', text_fmt)
+    res_title = 'Spinning & Non-Spin Reserves' if market_name == "ISO-NE" else 'Synchronized Reserves'
+    ws_dash.write('B16', res_title, text_fmt)
     ws_dash.write_formula('C16', '=F6', currency_fmt, value=float(metrics.get('SYNCH Revenue ($)', 0.0)))
     ws_dash.write_formula('D16', '=C16/$C$17', pct_fmt)
         

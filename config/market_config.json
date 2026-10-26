@@ -8,8 +8,8 @@
       "NSPIN": 1.0,
       "ECRS": 2.0
     },
-    "default_mileage_factor": 0.10,
-    "elcc_factor": 1.00
+    "default_mileage_factor": 0.1,
+    "elcc_factor": 1.0
   },
   "MISO": {
     "market_version": "2025.12",
@@ -19,8 +19,8 @@
       "SUPP": 1.0
     },
     "m_to_c_ratio": 7.2,
-    "default_mileage_factor": 0.10,
-    "elcc_factor": 0.50
+    "default_mileage_factor": 0.1,
+    "elcc_factor": 0.5
   },
   "PJM": {
     "market_version": "2025.10",
@@ -35,20 +35,51 @@
       "RegD": 3.5
     },
     "default_performance_score": {
-      "RegA": 0.90,
+      "RegA": 0.9,
       "RegD": 0.95
     },
-    "elcc_factor": 0.30
+    "elcc_factor": 0.3
   },
   "ISO-NE": {
-    "market_version": "2026.01",
+    "market_version": "2028.01-CAR",
+    "capacity_framework": {
+      "mode": "Seasonal",
+      "summer_months": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "winter_months": [
+        11,
+        12,
+        1,
+        2,
+        3,
+        4
+      ],
+      "default_summer_price_kw_month": 4.5,
+      "default_winter_price_kw_month": 2.5,
+      "default_annual_price_kw_month": 3.5,
+      "mri_accreditation_curve": {
+        "2": 0.22,
+        "3": 0.31,
+        "4": 0.4,
+        "6": 0.68,
+        "8": 0.85
+      },
+      "pfp_scarcity_rate_mwh": 9337.0,
+      "pfp_min_soc_pct": 0.15
+    },
     "reserve_durations": {
       "Reg": 0.5,
       "Spin": 0.5,
       "NonSpin": 0.5
     },
-    "default_mileage_factor": 0.10,
-    "elcc_factor": 0.50,
+    "default_mileage_factor": 0.1,
+    "elcc_factor": 0.4,
     "wdt_tariff": {
       "onpeak_rate_kw_month": 10.55,
       "midpeak_rate_kw_month": 1.35,
@@ -56,6 +87,21 @@
       "customer_charge_month": 32.82,
       "utility": "Narragansett Electric / Rhode Island Energy",
       "tariff": "Electric Tariff No. 3"
+    },
+    "btm_g32_tariff": {
+      "utility": "Narragansett Electric / Rhode Island Energy",
+      "tariff": "Rate G-32 (Large Demand)",
+      "customer_charge_month": 850.0,
+      "distribution_demand_kw_month": 6.0,
+      "transmission_demand_kw_month": 5.5,
+      "total_demand_kw_month": 11.5,
+      "connectedsolutions_rate_kw_yr": 275.0,
+      "connectedsolutions_summer_months": [
+        6,
+        7,
+        8,
+        9
+      ]
     }
   }
 }
