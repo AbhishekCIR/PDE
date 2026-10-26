@@ -103,7 +103,8 @@ reg_throughput_factor = st.sidebar.slider("Regulation AGC Throughput Factor", mi
 # ISO-NE / WDT parameters
 enable_reserves = True
 apply_wdt_charges = True
-isone_reg_cap_pct = 20.0
+isone_reg_cap_pct = 100.0
+isone_enforce_15min = True
 isone_capacity_mode = "Seasonal (2028+ CAR Reform)"
 summer_capacity_price = 4.50
 winter_capacity_price = 2.50
@@ -158,9 +159,26 @@ if selected_market == "ISO-NE":
         help="Maintains an emergency 15% State-of-Charge buffer during peak risk hours to prevent catastrophic $9,337/MWh Pay-for-Performance penalties."
     )
 
-    isone_reg_cap_pct = st.sidebar.slider(
-        "Regulation Capacity (%)", min_value=0.0, max_value=50.0, value=20.0, step=1.0
+    uncap_reg = st.sidebar.checkbox(
+        "Uncap Regulation (100% Inverter Nameplate MW)",
+        value=True,
+        help="Allows the battery to allocate up to 100% of its inverter power to regulation without any artificial percentage cap."
     )
+    if uncap_reg:
+        isone_reg_cap_pct = 100.0
+    else:
+        isone_reg_cap_pct = st.sidebar.slider(
+            "Regulation Capacity Ceiling (%)", min_value=0.0, max_value=100.0, value=20.0, step=5.0,
+            help="Custom ceiling on regulation capacity as a % of battery nameplate."
+        )
+
+    isone_res_choice = st.sidebar.selectbox(
+        "Data Resolution & WDT Modeling",
+        ["Auto-Upsample 1-Hr to 15-Min (Recommended for WDT)", "Direct 1-Hour Resolution"],
+        index=0,
+        help="If your input data is hourly (8,760 rows), 'Auto-Upsample' expands each hour into four 15-min intervals so RIE WDT 15-min peak billing demand is captured with exact precision. 'Direct 1-Hour' runs directly on hourly steps."
+    )
+    isone_enforce_15min = isone_res_choice.startswith("Auto-Upsample")
     enable_reserves = st.sidebar.checkbox("Enable Spinning/Non-Spin Reserves", value=True)
     apply_wdt_charges = st.sidebar.checkbox(
         "Apply WDT Demand Charges (RI Energy Tariff No. 3)", value=True,
@@ -593,14 +611,18 @@ if st.session_state['data_df'] is not None:
                 def update_progress(current, total):
                     progress_bar.progress((current + 1) / total, text=f"Solving Optimization: step {current+1} of {total}")
 
-                df_opt = optimizer.run_optimization_dispatch(
-                    df=data_in,
-                    progress_callback=update_progress,
-                    forecast_engine=forecaster,
-                    forecast_horizon_hrs=forecast_horizon_hrs,
-                    forecast_mape=forecast_mape,
-                    rolling_step_hrs=rolling_step_hrs
-                )
+                dispatch_kwargs = {
+                    "df": data_in,
+                    "progress_callback": update_progress,
+                    "forecast_engine": forecaster,
+                    "forecast_horizon_hrs": forecast_horizon_hrs,
+                    "forecast_mape": forecast_mape,
+                    "rolling_step_hrs": rolling_step_hrs
+                }
+                if selected_market == "ISO-NE":
+                    dispatch_kwargs["enforce_15min"] = isone_enforce_15min
+
+                df_opt = optimizer.run_optimization_dispatch(**dispatch_kwargs)
                 progress_bar.empty()
                 st.success("Optimization Solved Successfully!")
 

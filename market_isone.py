@@ -75,7 +75,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         reg_throughput_factor: float = 0.15,
         is_tolling: bool = False,
         elcc_factor: float = None,
-        reg_cap_pct: float = 20.0,
+        reg_cap_pct: float = 100.0,
         enable_reserves: bool = True,
         apply_wdt_charges: bool = True,
         # CAR 2028+ Reform & Seasonal Parameters
@@ -264,10 +264,21 @@ class ISONE_Optimizer(BESS_Simulator_Base):
 
         return df
 
-    def run_optimization_dispatch(self, df, **kwargs):
-        """Upsample to 15-min if needed, then run base-class dispatch."""
-        df_15 = self.ensure_15min_resolution(df)
-        return super().run_optimization_dispatch(df_15, **kwargs)
+    def run_optimization_dispatch(self, df, enforce_15min: bool = True, **kwargs):
+        """
+        If enforce_15min is True (default), automatically upsamples hourly data 
+        to 15-minute resolution to model RIE WDT 15-minute billing demand peaks.
+        If enforce_15min is False, runs directly at the data's native resolution (e.g. 1-hour).
+        """
+        if enforce_15min:
+            df_proc = self.ensure_15min_resolution(df)
+        else:
+            df_proc = df.copy()
+            if "timestamp" not in df_proc.columns and (isinstance(df_proc.index, pd.DatetimeIndex) or df_proc.index.name == "timestamp"):
+                df_proc = df_proc.reset_index().rename(columns={"index": "timestamp"})
+            df_proc["timestamp"] = pd.to_datetime(df_proc["timestamp"])
+            df_proc = df_proc.sort_values("timestamp").reset_index(drop=True)
+        return super().run_optimization_dispatch(df_proc, **kwargs)
 
     # ------------------------------------------------------------------
     # Sample data
