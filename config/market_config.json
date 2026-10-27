@@ -78,7 +78,7 @@
       "Spin": 0.5,
       "NonSpin": 0.5
     },
-    "default_mileage_factor": 0.1,
+    "default_mileage_factor": 4.0,
     "elcc_factor": 0.4,
     "wdt_tariff": {
       "onpeak_rate_kw_month": 10.55,

@@ -64,7 +64,30 @@ if selected_market == "ERCOT":
 elif selected_market == "MISO":
     elcc_default = 0.50
     cap_price_default = 50.0
-elif selected_market == "PJM":
+el@st.cache_data
+def get_isone_template_bytes():
+    """Returns (xlsx_bytes, csv_bytes) for ISO-NE input template with official ISO-NE headers."""
+    isone_opt = ISONE_Optimizer(power_mw=4.5, duration_hr=3.0)
+    df_sample = isone_opt.generate_sample_data(days=365)
+    df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Provide friendly official ISO-NE naming alongside standard keys
+    df_export = df_sample[['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']].copy()
+    df_export.rename(columns={
+        'Price_RegUp': 'Regulation_Capacity_Price',
+        'Price_Reg_Service': 'Regulation_Service_Price',
+        'Price_Spin': 'TMSR_Spin_Price',
+        'Price_NonSpin': 'TMNSR_NonSpin_Price'
+    }, inplace=True)
+    
+    csv_bytes = df_export.to_csv(index=False).encode('utf-8')
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df_export.to_excel(writer, sheet_name='ISONE_Market_Data', index=False)
+    xlsx_bytes = buf.getvalue()
+    return xlsx_bytes, csv_bytes
+
+if selected_market == "PJM":
     elcc_default = 0.37
     cap_price_default = 131.57
 elif selected_market == "ISO-NE":
@@ -184,7 +207,7 @@ if selected_market == "ISO-NE":
         "Apply WDT Demand Charges (RI Energy Tariff No. 3)", value=True,
         help="Narragansett Electric Wholesale Distribution Tariff demand charges + hard on-peak no-charge constraint ($10.55/kW-mo on-peak penalty prevention)."
     )
-    mileage_factor = st.sidebar.number_input("Regulation Mileage Factor", min_value=0.0, value=0.10, step=0.01)
+    mileage_factor = st.sidebar.number_input("Regulation Mileage Ratio (miles/MW)", min_value=0.0, value=4.0, step=0.5, help="ISO-NE Regulation Service mileage ratio (miles/MW-hr), typically 3.0 to 5.0 miles/MW for battery storage.")
     st.sidebar.caption(
         "🚫 **On-peak (weekdays 14:00–19:00):** charging is **hard-blocked** when WDT is enabled "
         f"(${ISONE_Optimizer.ONPEAK_RATE}/kW-month)."
@@ -326,7 +349,7 @@ elif selected_market == "MISO":
 elif selected_market == "PJM":
     required_cols_msg = "`timestamp`, `LMP`, `RMCCP`, `RMPCP`, `Mileage`, `Price_SYNCH`, `Price_NONSYNCH` (or `Reg_Price` / `Reg_Effective_Price`)"
 elif selected_market == "ISO-NE":
-    required_cols_msg = "`timestamp`, `LMP`, `Charge_LMP`, `Price_RegUp`, `Price_RegDn`, `Price_Reg_Service`, `Price_Spin`, `Price_NonSpin` (15-min preferred; hourly auto-upsampled)"
+    required_cols_msg = "`timestamp`, `LMP`, `Price_RegUp` (or `Regulation Capacity Clearing Price`), `Price_Reg_Service` (or `Regulation Service Clearing Price`), `Price_Spin` (or `Ten-Minute Spinning Reserve / TMSR`), `Price_NonSpin` (or `TMNSR`)"
 else:
     required_cols_msg = "`timestamp`, `LMP`, `Reg_Price`"
 
@@ -391,6 +414,27 @@ if selected_market == "PJM":
             use_container_width=True
         )
 
+if selected_market == "ISO-NE":
+    st.caption("📥 **Need an ISO-NE 8,760 template?** Download pre-formatted full-year ISO-NE input files with standard and official market headers:")
+    iso_col1, iso_col2 = st.columns([1, 1])
+    iso_xlsx, iso_csv = get_isone_template_bytes()
+    with iso_col1:
+        st.download_button(
+            label="📊 Download 8760 ISO-NE Template (.xlsx)",
+            data=iso_xlsx,
+            file_name="ISONE_Market_Template_8760.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    with iso_col2:
+        st.download_button(
+            label="📄 Download 8760 ISO-NE Template (.csv)",
+            data=iso_csv,
+            file_name="ISONE_Market_Template_8760.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
 uploaded_file = st.file_uploader("Upload Market CSV or Excel file", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
@@ -421,14 +465,41 @@ if uploaded_file is not None:
             col_map = {c.strip().lower(): c for c in df_raw.columns}
             rename = {}
             alias_map = {
-                'timestamp': ['timestamp', 'datetime', 'date_time', 'time'],
-                'LMP': ['lmp', 'da_lmp', 'price'],
-                'Charge_LMP': ['charge_lmp', 'rt_lmp'],
-                'Price_RegUp': ['price_regup', 'regup'],
-                'Price_RegDn': ['price_regdn', 'regdn'],
-                'Price_Reg_Service': ['price_reg_service', 'reg_service', 'regmileage'],
-                'Price_Spin': ['price_spin', 'spin', 'tmsr'],
-                'Price_NonSpin': ['price_nonspin', 'nonspin', 'tmnsr'],
+                'timestamp': ['timestamp', 'datetime', 'date_time', 'time', 'local date', 'date', 'interval_beginning'],
+                'LMP': [
+                    'lmp', 'da_lmp', 'rt_lmp', 'locational marginal price', 'final lmp',
+                    'real-time lmp', 'day-ahead lmp', 'price', 'energy_price'
+                ],
+                'Charge_LMP': ['charge_lmp', 'charge_price'],
+                'Price_RegUp': [
+                    'price_regup', 'regup', 'regulation capacity clearing price', 
+                    'regulation_capacity_clearing_price', 'regulation_capacity_price', 
+                    'rmccp', 'reg_capacity', 'price_reg', 'regulation clearing price', 
+                    'reg capacity', 'regulation'
+                ],
+                'Price_RegDn': [
+                    'price_regdn', 'regdn'
+                ],
+                'Price_Reg_Service': [
+                    'price_reg_service', 'reg_service', 'regmileage', 
+                    'regulation service clearing price', 'regulation_service_clearing_price',
+                    'regulation_service_price', 'rmpcp', 'mileage_price', 'reg service', 'service_price'
+                ],
+                'Price_Spin': [
+                    'price_spin', 'spin', 'tmsr', 'tmsr_spin_price',
+                    'ten-minute spinning reserve clearing price', 
+                    'ten-minute spinning reserve clearing price (tmsr)',
+                    'spinning reserve clearing price', 'spinning_reserve',
+                    'ten minute spinning reserve clearing price', 'tmsr clearing price'
+                ],
+                'Price_NonSpin': [
+                    'price_nonspin', 'nonspin', 'tmnsr', 'tmor', 'tmnsr_nonspin_price',
+                    'ten-minute non-spinning reserve clearing price', 
+                    'ten-minute non-spinning reserve clearing price (tmnsr)',
+                    'thirty-minute operating reserve clearing price',
+                    'thirty-minute operating reserve clearing price (tmor)',
+                    'total reserve clearing price', 'non_spin'
+                ],
             }
             for std, aliases in alias_map.items():
                 for a in aliases:
@@ -445,6 +516,12 @@ if uploaded_file is not None:
             if 'Charge_LMP' not in df_clean.columns:
                 df_clean['Charge_LMP'] = df_clean['LMP']
                 logs.append("Charge_LMP missing — defaulted to LMP")
+            # ISO-NE regulation is a single symmetric clearing price (RMCCP)
+            if 'Price_RegUp' in df_clean.columns and ('Price_RegDn' not in df_clean.columns or df_clean['Price_RegDn'].sum() == 0):
+                df_clean['Price_RegDn'] = df_clean['Price_RegUp']
+            elif 'Price_RegDn' in df_clean.columns and ('Price_RegUp' not in df_clean.columns or df_clean['Price_RegUp'].sum() == 0):
+                df_clean['Price_RegUp'] = df_clean['Price_RegDn']
+
             for col in ['Price_RegUp', 'Price_RegDn', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']:
                 if col not in df_clean.columns:
                     df_clean[col] = 0.0

@@ -70,7 +70,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         max_cycles_per_day: float = 1.0,
         initial_soc_pct: float = 0.5,
         degradation_cost_per_mwh: float = 5.0,
-        mileage_factor: float = 0.10,
+        mileage_factor: float = 4.0,
         capacity_price_kw_month: float = 3.50,
         reg_throughput_factor: float = 0.15,
         is_tolling: bool = False,
@@ -449,11 +449,11 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             if "Price_RegUp" in df_prices.columns
             else np.zeros(T_day)
         )
-        price_reg_dn = (
-            df_prices["Price_RegDn"].values
-            if "Price_RegDn" in df_prices.columns
-            else np.zeros(T_day)
-        )
+        # ISO-NE regulation is a single symmetric capacity clearing price (RMCCP)
+        if "Price_RegDn" in df_prices.columns and (df_prices["Price_RegDn"].values > 0).any():
+            price_reg_dn = df_prices["Price_RegDn"].values
+        else:
+            price_reg_dn = price_reg_up
         price_reg_svc = (
             df_prices["Price_Reg_Service"].values
             if "Price_Reg_Service" in df_prices.columns
@@ -483,7 +483,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             )
             reg_deg = (
                 (reg_up[t] + reg_dn[t])
-                * self.mileage_factor
+                * self.reg_throughput_factor
                 * self.deg_cost
                 * timestep_hours
             )
@@ -563,9 +563,11 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         price_reg_up = (
             df_out["Price_RegUp"] if "Price_RegUp" in df_out.columns else 0.0
         )
-        price_reg_dn = (
-            df_out["Price_RegDn"] if "Price_RegDn" in df_out.columns else 0.0
-        )
+        # ISO-NE regulation is a single symmetric capacity clearing price (RMCCP)
+        if "Price_RegDn" in df_out.columns and (isinstance(df_out["Price_RegDn"], (pd.Series, np.ndarray)) and (df_out["Price_RegDn"] > 0).any()):
+            price_reg_dn = df_out["Price_RegDn"]
+        else:
+            price_reg_dn = price_reg_up
         price_reg_svc = (
             df_out["Price_Reg_Service"]
             if "Price_Reg_Service" in df_out.columns
@@ -589,7 +591,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             (reg_up + reg_dn) * price_reg_svc * self.mileage_factor * timestep_hours
         )
         reg_deg = (
-            (reg_up + reg_dn) * self.mileage_factor * self.deg_cost * timestep_hours
+            (reg_up + reg_dn) * self.reg_throughput_factor * self.deg_cost * timestep_hours
         )
         df_out["Regulation_Revenue"] = reg_cap_rev + reg_mileage - reg_deg
 
