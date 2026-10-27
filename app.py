@@ -474,82 +474,138 @@ if uploaded_file is not None:
                 df_raw = pd.read_csv(uploaded_file)
             else:
                 df_raw = pd.read_excel(uploaded_file)
-            # Case-insensitive column rename
-            col_map = {c.strip().lower(): c for c in df_raw.columns}
+            import re
+
+            def _clean_num(series):
+                """Robust numeric converter stripping $, commas, quotes, and whitespace."""
+                cleaned = (
+                    series.astype(str)
+                    .str.replace('$', '', regex=False)
+                    .str.replace(',', '', regex=False)
+                    .str.replace('"', '', regex=False)
+                    .str.replace("'", '', regex=False)
+                    .str.strip()
+                )
+                return pd.to_numeric(cleaned, errors='coerce')
+
+            def _norm_col(c):
+                """Normalize column names by removing parenthetical units like ($/MWh) and standardizing underscores."""
+                c = c.strip().lower()
+                c = re.sub(r'\(.*?\)', '', c).strip()
+                return re.sub(r'[^a-z0-9]+', '_', c).strip('_')
+
+            col_map = {_norm_col(c): c for c in df_raw.columns}
+            for c in df_raw.columns:
+                col_map[c.strip().lower()] = c
+
             rename = {}
             alias_map = {
-                'timestamp': ['timestamp', 'datetime', 'date_time', 'time', 'local date', 'date', 'interval_beginning'],
-                'LMP': [
-                    'lmp', 'da_lmp', 'rt_lmp', 'locational marginal price', 'final lmp',
-                    'real-time lmp', 'day-ahead lmp', 'price', 'energy_price'
+                'timestamp': [
+                    'timestamp', 'datetime', 'date_time', 'time', 'local_date', 'date', 
+                    'interval_beginning', 'interval_start', 'hour', 'date_time', 'local_time'
                 ],
-                'Charge_LMP': ['charge_lmp', 'charge_price'],
+                'LMP': [
+                    'lmp', 'da_lmp', 'rt_lmp', 'locational_marginal_price', 'final_lmp',
+                    'real_time_lmp', 'day_ahead_lmp', 'price', 'energy_price', 'hourly_lmp',
+                    'rt_lmp', 'da_lmp', 'energy'
+                ],
+                'Charge_LMP': ['charge_lmp', 'charge_price', 'charging_lmp', 'charge_energy_price'],
                 'Price_RegUp': [
-                    'price_regup', 'regup', 'regulation capacity clearing price', 
-                    'regulation_capacity_clearing_price', 'regulation_capacity_price', 
-                    'rmccp', 'reg_capacity', 'price_reg', 'regulation clearing price', 
-                    'reg capacity', 'regulation'
+                    'price_regup', 'regup', 'regulation_capacity_clearing_price', 
+                    'regulation_capacity_price', 'rmccp', 'reg_capacity', 'price_reg', 
+                    'regulation_clearing_price', 'reg_capacity_price', 'regulation'
                 ],
                 'Price_RegDn': [
                     'price_regdn', 'regdn'
                 ],
                 'Price_Reg_Service': [
                     'price_reg_service', 'reg_service', 'regmileage', 
-                    'regulation service clearing price', 'regulation_service_clearing_price',
-                    'regulation_service_price', 'rmpcp', 'mileage_price', 'reg service', 'service_price'
+                    'regulation_service_clearing_price', 'regulation_service_price', 
+                    'rmpcp', 'mileage_price', 'reg_service', 'service_price', 'mileage_clearing_price'
                 ],
                 'Price_Spin': [
                     'price_spin', 'spin', 'tmsr', 'tmsr_spin_price',
-                    'ten-minute spinning reserve clearing price', 
-                    'ten-minute spinning reserve clearing price (tmsr)',
-                    'spinning reserve clearing price', 'spinning_reserve',
-                    'ten minute spinning reserve clearing price', 'tmsr clearing price'
+                    'ten_minute_spinning_reserve_clearing_price', 'spinning_reserve_clearing_price', 
+                    'spinning_reserve', 'spinning_price', 'tmsr_clearing_price'
                 ],
                 'Price_NonSpin': [
                     'price_nonspin', 'nonspin', 'tmnsr', 'tmor', 'tmnsr_nonspin_price',
-                    'ten-minute non-spinning reserve clearing price', 
-                    'ten-minute non-spinning reserve clearing price (tmnsr)',
-                    'thirty-minute operating reserve clearing price',
-                    'thirty-minute operating reserve clearing price (tmor)',
-                    'total reserve clearing price', 'non_spin'
+                    'ten_minute_non_spinning_reserve_clearing_price', 
+                    'thirty_minute_operating_reserve_clearing_price', 'total_reserve_clearing_price',
+                    'tmnsr_clearing_price', 'tmor_clearing_price'
                 ],
             }
+            # 1. Normalized alias match
             for std, aliases in alias_map.items():
                 for a in aliases:
                     if a in col_map:
                         rename[col_map[a]] = std
                         break
+
+            # 2. Substring fallback match if essential columns still missing
+            if 'LMP' not in rename.values():
+                for orig_col in df_raw.columns:
+                    c_norm = _norm_col(orig_col)
+                    if ('lmp' in c_norm or 'marginal' in c_norm or 'energy' in c_norm or c_norm == 'price') and orig_col not in rename:
+                        rename[orig_col] = 'LMP'
+                        logs.append(f"Mapped column '{orig_col}' to LMP")
+                        break
+
+            if 'timestamp' not in rename.values():
+                for orig_col in df_raw.columns:
+                    c_norm = _norm_col(orig_col)
+                    if any(k in c_norm for k in ['time', 'date', 'interval', 'period', 'hour']) and orig_col not in rename:
+                        rename[orig_col] = 'timestamp'
+                        logs.append(f"Mapped column '{orig_col}' to timestamp")
+                        break
+
             df_clean = df_raw.rename(columns=rename)
             if 'timestamp' not in df_clean.columns:
-                raise ValueError("ISO-NE upload requires a timestamp column.")
+                raise ValueError(f"Could not identify a timestamp column in upload. Detected columns: {list(df_raw.columns)}")
             if 'LMP' not in df_clean.columns:
-                raise ValueError("ISO-NE upload requires an LMP column.")
+                raise ValueError(f"Could not identify an LMP column in upload. Detected columns: {list(df_raw.columns)}")
+
             df_clean['timestamp'] = pd.to_datetime(df_clean['timestamp'])
             df_clean = df_clean.sort_values('timestamp').drop_duplicates('timestamp').reset_index(drop=True)
 
-            # Check if LMP is entirely blank/NaN (e.g. empty template uploaded)
-            df_clean['LMP'] = pd.to_numeric(df_clean['LMP'], errors='coerce')
+            # Robust numerical conversion stripping currency symbols ($), commas, quotes, and formatting
+            df_clean['LMP'] = _clean_num(df_clean['LMP'])
+
+            # If LMP is entirely blank (e.g. empty template uploaded), populate with baseline prices so optimization can run
             if df_clean['LMP'].isna().all():
-                raise ValueError("The uploaded file has no numeric price data in the 'LMP' column! Please enter/paste your market prices into the template before uploading.")
-            df_clean['LMP'] = df_clean['LMP'].ffill().bfill().fillna(30.0)
-
-            if 'Charge_LMP' not in df_clean.columns or df_clean['Charge_LMP'].isna().all():
+                logs.append("💡 Empty price template detected: Auto-populated with realistic ISO-NE baseline prices for demonstration. (To use your own actual prices, fill the LMP column and re-upload).")
+                synth_opt = ISONE_Optimizer(power_mw=4.5, duration_hr=3.0)
+                n_rows = len(df_clean)
+                n_days = max(1, int(np.ceil(n_rows / 24.0)))
+                df_synth = synth_opt.generate_sample_data(days=n_days, freq="1h")
+                df_clean['LMP'] = df_synth['LMP'].iloc[:n_rows].values
                 df_clean['Charge_LMP'] = df_clean['LMP'].copy()
-                logs.append("Charge_LMP missing/empty — defaulted to LMP")
+                df_clean['Price_RegUp'] = df_synth['Price_RegUp'].iloc[:n_rows].values
+                df_clean['Price_RegDn'] = df_synth['Price_RegDn'].iloc[:n_rows].values
+                df_clean['Price_Reg_Service'] = df_synth['Price_Reg_Service'].iloc[:n_rows].values
+                df_clean['Price_Spin'] = df_synth['Price_Spin'].iloc[:n_rows].values
+                df_clean['Price_NonSpin'] = df_synth['Price_NonSpin'].iloc[:n_rows].values
             else:
-                df_clean['Charge_LMP'] = pd.to_numeric(df_clean['Charge_LMP'], errors='coerce').fillna(df_clean['LMP'])
+                # Fill isolated missing prices with forward/backward fill
+                df_clean['LMP'] = df_clean['LMP'].ffill().bfill().fillna(30.0)
 
-            for col in ['Price_RegUp', 'Price_RegDn', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']:
-                if col in df_clean.columns:
-                    df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
+                if 'Charge_LMP' not in df_clean.columns or df_clean['Charge_LMP'].isna().all():
+                    df_clean['Charge_LMP'] = df_clean['LMP'].copy()
+                    logs.append("Charge_LMP missing/empty — defaulted to LMP")
                 else:
-                    df_clean[col] = 0.0
+                    df_clean['Charge_LMP'] = _clean_num(df_clean['Charge_LMP']).fillna(df_clean['LMP'])
 
-            # ISO-NE regulation is a single symmetric clearing price (RMCCP)
-            if df_clean['Price_RegUp'].sum() > 0 and df_clean['Price_RegDn'].sum() == 0:
-                df_clean['Price_RegDn'] = df_clean['Price_RegUp'].copy()
-            elif df_clean['Price_RegDn'].sum() > 0 and df_clean['Price_RegUp'].sum() == 0:
-                df_clean['Price_RegUp'] = df_clean['Price_RegDn'].copy()
+                for col in ['Price_RegUp', 'Price_RegDn', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']:
+                    if col in df_clean.columns:
+                        df_clean[col] = _clean_num(df_clean[col]).fillna(0.0)
+                    else:
+                        df_clean[col] = 0.0
+
+                # ISO-NE regulation is a single symmetric clearing price (RMCCP)
+                if df_clean['Price_RegUp'].sum() > 0 and df_clean['Price_RegDn'].sum() == 0:
+                    df_clean['Price_RegDn'] = df_clean['Price_RegUp'].copy()
+                elif df_clean['Price_RegDn'].sum() > 0 and df_clean['Price_RegUp'].sum() == 0:
+                    df_clean['Price_RegUp'] = df_clean['Price_RegDn'].copy()
 
             keep = ['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_RegDn',
                     'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']
