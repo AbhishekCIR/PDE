@@ -64,30 +64,7 @@ if selected_market == "ERCOT":
 elif selected_market == "MISO":
     elcc_default = 0.50
     cap_price_default = 50.0
-el@st.cache_data
-def get_isone_template_bytes():
-    """Returns (xlsx_bytes, csv_bytes) for ISO-NE input template with official ISO-NE headers."""
-    isone_opt = ISONE_Optimizer(power_mw=4.5, duration_hr=3.0)
-    df_sample = isone_opt.generate_sample_data(days=365)
-    df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Provide friendly official ISO-NE naming alongside standard keys
-    df_export = df_sample[['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']].copy()
-    df_export.rename(columns={
-        'Price_RegUp': 'Regulation_Capacity_Price',
-        'Price_Reg_Service': 'Regulation_Service_Price',
-        'Price_Spin': 'TMSR_Spin_Price',
-        'Price_NonSpin': 'TMNSR_NonSpin_Price'
-    }, inplace=True)
-    
-    csv_bytes = df_export.to_csv(index=False).encode('utf-8')
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-        df_export.to_excel(writer, sheet_name='ISONE_Market_Data', index=False)
-    xlsx_bytes = buf.getvalue()
-    return xlsx_bytes, csv_bytes
-
-if selected_market == "PJM":
+elif selected_market == "PJM":
     elcc_default = 0.37
     cap_price_default = 131.57
 elif selected_market == "ISO-NE":
@@ -391,6 +368,28 @@ def get_pjm_template_bytes():
                 df_sample.to_excel(writer, sheet_name='Hourly_Market_Data', index=False)
             xlsx_bytes = buf.getvalue()
             
+    return xlsx_bytes, csv_bytes
+
+@st.cache_data
+def get_isone_template_bytes():
+    """Returns (xlsx_bytes, csv_bytes) for ISO-NE input template with official ISO-NE headers."""
+    isone_opt = ISONE_Optimizer(power_mw=4.5, duration_hr=3.0)
+    df_sample = isone_opt.generate_sample_data(days=365)
+    df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    df_export = df_sample[['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']].copy()
+    df_export.rename(columns={
+        'Price_RegUp': 'Regulation_Capacity_Price',
+        'Price_Reg_Service': 'Regulation_Service_Price',
+        'Price_Spin': 'TMSR_Spin_Price',
+        'Price_NonSpin': 'TMNSR_NonSpin_Price'
+    }, inplace=True)
+    
+    csv_bytes = df_export.to_csv(index=False).encode('utf-8')
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df_export.to_excel(writer, sheet_name='ISONE_Market_Data', index=False)
+    xlsx_bytes = buf.getvalue()
     return xlsx_bytes, csv_bytes
 
 if selected_market == "PJM":
