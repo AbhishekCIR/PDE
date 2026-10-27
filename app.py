@@ -372,23 +372,26 @@ def get_pjm_template_bytes():
 
 @st.cache_data
 def get_isone_template_bytes():
-    """Returns (xlsx_bytes, csv_bytes) for ISO-NE input template with official ISO-NE headers."""
-    isone_opt = ISONE_Optimizer(power_mw=4.5, duration_hr=3.0)
-    df_sample = isone_opt.generate_sample_data(days=365)
-    df_sample['timestamp'] = df_sample['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    """
+    Returns (xlsx_bytes, csv_bytes) for ISO-NE input template.
+    Generates an 8,760-row HOURLY template (1 row per hour of the year)
+    with official ISO-NE column headers and EMPTY values for users to populate.
+    """
+    timestamps = pd.date_range(start="2026-01-01 00:00:00", periods=8760, freq="1h")
+    df_template = pd.DataFrame({
+        'timestamp': timestamps.strftime('%Y-%m-%d %H:%M:%S'),
+        'LMP': None,
+        'Charge_LMP': None,
+        'Regulation_Capacity_Price': None,
+        'Regulation_Service_Price': None,
+        'TMSR_Spin_Price': None,
+        'TMNSR_NonSpin_Price': None
+    })
     
-    df_export = df_sample[['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']].copy()
-    df_export.rename(columns={
-        'Price_RegUp': 'Regulation_Capacity_Price',
-        'Price_Reg_Service': 'Regulation_Service_Price',
-        'Price_Spin': 'TMSR_Spin_Price',
-        'Price_NonSpin': 'TMNSR_NonSpin_Price'
-    }, inplace=True)
-    
-    csv_bytes = df_export.to_csv(index=False).encode('utf-8')
+    csv_bytes = df_template.to_csv(index=False).encode('utf-8')
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-        df_export.to_excel(writer, sheet_name='ISONE_Market_Data', index=False)
+        df_template.to_excel(writer, sheet_name='ISONE_Market_Data', index=False)
     xlsx_bytes = buf.getvalue()
     return xlsx_bytes, csv_bytes
 
@@ -414,22 +417,22 @@ if selected_market == "PJM":
         )
 
 if selected_market == "ISO-NE":
-    st.caption("📥 **Need an ISO-NE 8,760 template?** Download pre-formatted full-year ISO-NE input files with standard and official market headers:")
+    st.caption("📥 **Need an ISO-NE 8,760 Hourly Template?** Download pre-formatted full-year (8,760 hourly rows) input template with official market headers and blank price columns ready for your market data:")
     iso_col1, iso_col2 = st.columns([1, 1])
     iso_xlsx, iso_csv = get_isone_template_bytes()
     with iso_col1:
         st.download_button(
-            label="📊 Download 8760 ISO-NE Template (.xlsx)",
+            label="📊 Download 8760 Hourly ISO-NE Template (.xlsx)",
             data=iso_xlsx,
-            file_name="ISONE_Market_Template_8760.xlsx",
+            file_name="ISONE_Market_Template_8760_Hourly.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
     with iso_col2:
         st.download_button(
-            label="📄 Download 8760 ISO-NE Template (.csv)",
+            label="📄 Download 8760 Hourly ISO-NE Template (.csv)",
             data=iso_csv,
-            file_name="ISONE_Market_Template_8760.csv",
+            file_name="ISONE_Market_Template_8760_Hourly.csv",
             mime="text/csv",
             use_container_width=True
         )
@@ -720,6 +723,7 @@ if st.session_state['data_df'] is not None:
                     )
 
                 # Pre-generate live formula Excel workbook
+                reg_wear_factor = 0.15 if selected_market == "ISO-NE" else mileage_factor
                 excel_bytes = export_bess_dashboard_excel(
                     df_results=df_opt,
                     metrics=metrics,
@@ -729,7 +733,7 @@ if st.session_state['data_df'] is not None:
                     capacity_price_mw_day=capacity_price_mw_day,
                     elcc_factor=elcc_factor,
                     deg_cost=deg_cost,
-                    mileage_factor=mileage_factor,
+                    mileage_factor=reg_wear_factor,
                     tranches=pjm_user_tranches if (selected_market == "PJM" and enable_pjm_tranches) else None,
                     market_name=selected_market
                 )

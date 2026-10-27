@@ -164,6 +164,11 @@ def export_bess_dashboard_excel(
             reg_p_val = float(df_results['Reg_Price'].iloc[i])
         elif 'Reg_Effective_Price' in df_results.columns:
             reg_p_val = float(df_results['Reg_Effective_Price'].iloc[i])
+        elif 'Price_RegUp' in df_results.columns:
+            # ISO-NE two-part formula: RMCCP + (Mileage_Ratio * RMPCP)
+            p_up = float(df_results['Price_RegUp'].iloc[i])
+            p_svc = float(df_results['Price_Reg_Service'].iloc[i]) if 'Price_Reg_Service' in df_results.columns else 0.0
+            reg_p_val = p_up + (4.0 * p_svc)
         elif 'RMCCP_D' in df_results.columns:
             rmpcp_d = float(df_results['RMPCP_D'].iloc[i]) if 'RMPCP_D' in df_results.columns else 2.5
             reg_p_val = float(df_results['RMCCP_D'].iloc[i] * 0.95 + rmpcp_d * 3.2 * 0.95)

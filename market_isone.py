@@ -284,11 +284,13 @@ class ISONE_Optimizer(BESS_Simulator_Base):
     # Sample data
     # ------------------------------------------------------------------
     def generate_sample_data(self, days: int = 365, freq: str = "15min") -> pd.DataFrame:
-        """Generate synthetic ISO-NE prices at 15-minute resolution."""
+        """Generate synthetic ISO-NE prices at 15-minute or 1-hour resolution."""
         if freq in ("1h", "H", "h"):
-            freq = "15min"
-        periods = int(days * 24 * 4)  # 15-min intervals
-        timestamps = pd.date_range(start="2026-01-01", periods=periods, freq="15min")
+            periods = int(days * 24)
+            timestamps = pd.date_range(start="2026-01-01", periods=periods, freq="1h")
+        else:
+            periods = int(days * 24 * 4)  # 15-min intervals
+            timestamps = pd.date_range(start="2026-01-01", periods=periods, freq="15min")
         df = pd.DataFrame({"timestamp": timestamps})
 
         hours = df["timestamp"].dt.hour + df["timestamp"].dt.minute / 60.0
@@ -306,21 +308,16 @@ class ISONE_Optimizer(BESS_Simulator_Base):
 
         df["Charge_LMP"] = df["LMP"].copy()
 
-        # Regulation capacity prices (RMCCP-equivalent)
+        # Regulation capacity prices (single symmetric clearing price RMCCP under ISO-NE Market Rule 1)
         df["Price_RegUp"] = np.clip(
             18.0 + 22.0 * np.sin((hours - 8) * np.pi / 12) ** 2 * seasonal_mult
             + np.random.normal(0, 3, len(df)),
             2.0,
             None,
         )
-        df["Price_RegDn"] = np.clip(
-            16.0 + 20.0 * np.sin((hours - 8) * np.pi / 12) ** 2 * seasonal_mult
-            + np.random.normal(0, 3, len(df)),
-            2.0,
-            None,
-        )
         df.loc[spike_indices, "Price_RegUp"] += np.random.uniform(30, 100, size=len(spike_indices))
-        df.loc[spike_indices, "Price_RegDn"] += np.random.uniform(25, 90, size=len(spike_indices))
+        # Symmetric regulation capacity price
+        df["Price_RegDn"] = df["Price_RegUp"].copy()
 
         df["Price_Reg_Service"] = np.clip(np.random.uniform(1.0, 4.0, len(df)), 0.5, None)
         df["Price_Spin"] = np.clip(np.random.lognormal(mean=1.1, sigma=0.45, size=len(df)), 1.5, 40.0)
@@ -586,14 +583,24 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         if "Total_Reg_MW" not in df_out.columns:
             df_out["Total_Reg_MW"] = reg_up + reg_dn
 
+        # ISO-NE FERC Order 755 Two-Part Regulation Settlement:
+        # Effective Regulation Rate ($/MW-hr) = RMCCP (Capacity) + [Mileage_Ratio * RMPCP (Service)]
+        reg_rate = price_reg_up + (self.mileage_factor * price_reg_svc)
+        df_out["Reg_Price"] = reg_rate
+        df_out["Reg_Effective_Price"] = reg_rate
+
         reg_cap_rev = (reg_up * price_reg_up + reg_dn * price_reg_dn) * timestep_hours
         reg_mileage = (
             (reg_up + reg_dn) * price_reg_svc * self.mileage_factor * timestep_hours
         )
+        # Gross Regulation Market Revenue earned from ISO-NE:
+        df_out["Regulation_Revenue"] = reg_cap_rev + reg_mileage
+
+        # Regulation cell degradation wear cost ($/hr) = Reg_MW * reg_throughput_factor * deg_cost * dt
         reg_deg = (
             (reg_up + reg_dn) * self.reg_throughput_factor * self.deg_cost * timestep_hours
         )
-        df_out["Regulation_Revenue"] = reg_cap_rev + reg_mileage - reg_deg
+        df_out["Reg_Degradation_Cost"] = reg_deg
 
         spin_rev = spin * price_spin * timestep_hours
         nonspin_rev = nonspin * price_nonspin * timestep_hours
