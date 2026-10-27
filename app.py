@@ -44,6 +44,17 @@ from excel_dashboard_generator import export_bess_dashboard_excel
 # Configure the Streamlit page
 st.set_page_config(page_title="Multi-Market BESS Optimizer", page_icon="🔋", layout="wide")
 
+# Ensure PuLP solver binary has executable permissions on Linux (Streamlit Cloud)
+try:
+    import pulp
+    cbc_cmd = pulp.PULP_CBC_CMD()
+    if hasattr(cbc_cmd, "path") and cbc_cmd.path and os.path.exists(cbc_cmd.path):
+        if not os.access(cbc_cmd.path, os.X_OK):
+            os.chmod(cbc_cmd.path, 0o755)
+except Exception:
+    pass
+
+
 st.title("🔋 Battery Energy Storage System (BESS) Multi-Market Optimizer")
 st.markdown("""
 Co-optimize energy arbitrage and ancillary service awards dynamically using Mixed-Integer Linear Programming (MILP). Supports multiple operating modes, variable regulation tranches, rolling-horizon simulations, and audit-ready live formula Excel exports.
@@ -515,19 +526,31 @@ if uploaded_file is not None:
                 raise ValueError("ISO-NE upload requires an LMP column.")
             df_clean['timestamp'] = pd.to_datetime(df_clean['timestamp'])
             df_clean = df_clean.sort_values('timestamp').drop_duplicates('timestamp').reset_index(drop=True)
-            if 'Charge_LMP' not in df_clean.columns:
-                df_clean['Charge_LMP'] = df_clean['LMP']
-                logs.append("Charge_LMP missing — defaulted to LMP")
-            # ISO-NE regulation is a single symmetric clearing price (RMCCP)
-            if 'Price_RegUp' in df_clean.columns and ('Price_RegDn' not in df_clean.columns or df_clean['Price_RegDn'].sum() == 0):
-                df_clean['Price_RegDn'] = df_clean['Price_RegUp']
-            elif 'Price_RegDn' in df_clean.columns and ('Price_RegUp' not in df_clean.columns or df_clean['Price_RegUp'].sum() == 0):
-                df_clean['Price_RegUp'] = df_clean['Price_RegDn']
+
+            # Check if LMP is entirely blank/NaN (e.g. empty template uploaded)
+            df_clean['LMP'] = pd.to_numeric(df_clean['LMP'], errors='coerce')
+            if df_clean['LMP'].isna().all():
+                raise ValueError("The uploaded file has no numeric price data in the 'LMP' column! Please enter/paste your market prices into the template before uploading.")
+            df_clean['LMP'] = df_clean['LMP'].ffill().bfill().fillna(30.0)
+
+            if 'Charge_LMP' not in df_clean.columns or df_clean['Charge_LMP'].isna().all():
+                df_clean['Charge_LMP'] = df_clean['LMP'].copy()
+                logs.append("Charge_LMP missing/empty — defaulted to LMP")
+            else:
+                df_clean['Charge_LMP'] = pd.to_numeric(df_clean['Charge_LMP'], errors='coerce').fillna(df_clean['LMP'])
 
             for col in ['Price_RegUp', 'Price_RegDn', 'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']:
-                if col not in df_clean.columns:
+                if col in df_clean.columns:
+                    df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
+                else:
                     df_clean[col] = 0.0
-                    logs.append(f"Filled missing column {col} with 0.0")
+
+            # ISO-NE regulation is a single symmetric clearing price (RMCCP)
+            if df_clean['Price_RegUp'].sum() > 0 and df_clean['Price_RegDn'].sum() == 0:
+                df_clean['Price_RegDn'] = df_clean['Price_RegUp'].copy()
+            elif df_clean['Price_RegDn'].sum() > 0 and df_clean['Price_RegUp'].sum() == 0:
+                df_clean['Price_RegUp'] = df_clean['Price_RegDn'].copy()
+
             keep = ['timestamp', 'LMP', 'Charge_LMP', 'Price_RegUp', 'Price_RegDn',
                     'Price_Reg_Service', 'Price_Spin', 'Price_NonSpin']
             if 'CAP_LIMIT' in df_clean.columns:

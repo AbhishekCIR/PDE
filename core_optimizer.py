@@ -78,6 +78,38 @@ class BESS_Simulator_Base:
         raise NotImplementedError("Subclasses must implement calculate_summary_metrics")
 
     # --- Main Optimization Dispatch Engine ---
+    @staticmethod
+    def get_pulp_solver(gap_rel=0.005, time_limit=10, msg=0):
+        """
+        Returns a robust PuLP solver instance.
+        1. Checks for system coinor-cbc (/usr/bin/cbc) installed via packages.txt.
+        2. Ensures bundled CBC binary has executable permissions (chmod +x) on Linux.
+        3. Falls back gracefully to available solvers.
+        """
+        import os, sys, shutil
+        sys_cbc = shutil.which("cbc")
+        if not sys_cbc:
+            for candidate in ["/usr/bin/cbc", "/usr/local/bin/cbc", "/opt/homebrew/bin/cbc"]:
+                if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                    sys_cbc = candidate
+                    break
+        if sys_cbc and os.access(sys_cbc, os.X_OK):
+            return pulp.COIN_CMD(path=sys_cbc, msg=msg, gapRel=gap_rel, timeLimit=time_limit)
+
+        try:
+            bundled_cbc = pulp.PULP_CBC_CMD(msg=msg, gapRel=gap_rel, timeLimit=time_limit)
+            if hasattr(bundled_cbc, "path") and bundled_cbc.path and os.path.exists(bundled_cbc.path):
+                if not os.access(bundled_cbc.path, os.X_OK):
+                    try:
+                        os.chmod(bundled_cbc.path, 0o755)
+                    except Exception:
+                        pass
+            return bundled_cbc
+        except Exception:
+            pass
+
+        return pulp.PULP_CBC_CMD(msg=msg, gapRel=gap_rel, timeLimit=time_limit)
+
     def run_optimization_dispatch(self, df, progress_callback=None, forecast_engine=None, 
                                   forecast_horizon_hrs=48, forecast_mape=0.0, rolling_step_hrs=24):
         """
@@ -217,9 +249,13 @@ class BESS_Simulator_Base:
                     # Add market-specific constraints
                     self.add_market_constraints(prob, c, d, soc, subclass_vars, forecast_df, T_window, timestep_hours)
                     
-                    # Solve using PuLP CBC Solver with gap tolerance and warm starts (sequential initialization)
-                    solver = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
-                    prob.solve(solver)
+                    # Solve using robust PuLP CBC Solver with gap tolerance
+                    solver = self.get_pulp_solver(gap_rel=0.005, time_limit=10, msg=0)
+                    try:
+                        prob.solve(solver)
+                    except Exception:
+                        fallback = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
+                        prob.solve(fallback)
                     
                     # 3. Apply the dispatch results across the rolling step window
                     step_exec = min(step_size, T_window, T_total - t)
@@ -311,8 +347,12 @@ class BESS_Simulator_Base:
                 
                 self.add_market_constraints(prob, c, d, soc, subclass_vars, df_day, T_day, timestep_hours)
                 
-                solver = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
-                prob.solve(solver)
+                solver = self.get_pulp_solver(gap_rel=0.005, time_limit=10, msg=0)
+                try:
+                    prob.solve(solver)
+                except Exception:
+                    fallback = pulp.PULP_CBC_CMD(msg=0, gapRel=0.005, timeLimit=10)
+                    prob.solve(fallback)
                 
                 for t_idx, global_t in enumerate(day_indices):
                     charge_mw_arr[global_t] = c[t_idx].varValue or 0.0

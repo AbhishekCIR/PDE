@@ -237,21 +237,10 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             return df
 
         if abs(dt_hours - 1.0) < 0.05:
-            rows = []
-            price_cols = [
-                c for c in df.columns
-                if c != "timestamp" and pd.api.types.is_numeric_dtype(df[c])
-            ]
-            for _, row in df.iterrows():
-                base_ts = row["timestamp"]
-                for k in range(4):
-                    new_row = row.copy()
-                    new_row["timestamp"] = base_ts + pd.Timedelta(minutes=15 * k)
-                    rows.append(new_row)
-            out = pd.DataFrame(rows).reset_index(drop=True)
-            # Forward-fill prices across sub-intervals (hourly flat within the hour)
-            for col in price_cols:
-                out[col] = out[col].astype(float)
+            # Fast vectorized 4x upsampling for hourly data to 15-min
+            out = df.loc[df.index.repeat(4)].reset_index(drop=True)
+            offsets = np.tile(np.arange(4) * 15, len(df))
+            out["timestamp"] = pd.to_datetime(out["timestamp"]) + pd.to_timedelta(offsets, unit="m")
             return out
 
         # Already sub-hourly but not exactly 15-min: resample to 15-min mean

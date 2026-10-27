@@ -25,8 +25,12 @@ class PersistenceForecastEngine(BaseForecastEngine):
         - future_actual_df: The actual future dataframe (if testing noisy actual forecasts).
         """
         current_time = pd.to_datetime(current_time)
-        forecast_times = pd.date_range(start=current_time, periods=forecast_horizon_hrs, freq='h')
-        forecast_df = pd.DataFrame(index=forecast_times)
+        if future_actual_df is not None and not future_actual_df.empty:
+            forecast_times = future_actual_df.index
+            forecast_df = pd.DataFrame(index=forecast_times)
+        else:
+            forecast_times = pd.date_range(start=current_time, periods=forecast_horizon_hrs, freq='h')
+            forecast_df = pd.DataFrame(index=forecast_times)
         
         # Ensure df_history index is a DatetimeIndex
         if not df_history.empty and not isinstance(df_history.index, pd.DatetimeIndex):
@@ -40,6 +44,7 @@ class PersistenceForecastEngine(BaseForecastEngine):
         if not price_cols and future_actual_df is not None:
             price_cols = [c for c in future_actual_df.columns if c != 'timestamp']
         
+        T_horizon = len(forecast_df)
         for col in price_cols:
             if self.method == "noisy_actual" and future_actual_df is not None:
                 # Extract actual future prices and add noise
@@ -50,9 +55,9 @@ class PersistenceForecastEngine(BaseForecastEngine):
                 # If history is empty at initial step (t=0), fallback gracefully
                 if df_history.empty or len(df_history) == 0:
                     if future_actual_df is not None and col in future_actual_df.columns:
-                        vals = future_actual_df[col].iloc[:forecast_horizon_hrs].tolist()
-                        if len(vals) < forecast_horizon_hrs:
-                            vals += [vals[-1] if vals else 30.0] * (forecast_horizon_hrs - len(vals))
+                        vals = future_actual_df[col].iloc[:T_horizon].tolist()
+                        if len(vals) < T_horizon:
+                            vals += [vals[-1] if vals else 30.0] * (T_horizon - len(vals))
                         forecast_df[col] = vals
                     else:
                         forecast_df[col] = 30.0
@@ -75,9 +80,9 @@ class PersistenceForecastEngine(BaseForecastEngine):
                 # If history is empty at step 0, fallback to future actual or default
                 if df_history.empty or len(df_history) == 0:
                     if future_actual_df is not None and col in future_actual_df.columns:
-                        vals = future_actual_df[col].iloc[:forecast_horizon_hrs].tolist()
-                        if len(vals) < forecast_horizon_hrs:
-                            vals += [vals[-1] if vals else 30.0] * (forecast_horizon_hrs - len(vals))
+                        vals = future_actual_df[col].iloc[:T_horizon].tolist()
+                        if len(vals) < T_horizon:
+                            vals += [vals[-1] if vals else 30.0] * (T_horizon - len(vals))
                         forecast_df[col] = vals
                     else:
                         forecast_df[col] = 30.0
@@ -86,20 +91,22 @@ class PersistenceForecastEngine(BaseForecastEngine):
                 last_mask = df_history.index < current_time
                 if not last_mask.any():
                     if future_actual_df is not None and col in future_actual_df.columns:
-                        forecast_df[col] = future_actual_df[col].iloc[:forecast_horizon_hrs].values
+                        vals = future_actual_df[col].iloc[:T_horizon].tolist()
+                        if len(vals) < T_horizon:
+                            vals += [vals[-1] if vals else 30.0] * (T_horizon - len(vals))
+                        forecast_df[col] = vals
                     else:
                         forecast_df[col] = 30.0
                     continue
                 
-                # Check if we can do 24h persistence profile
+                # Check if we can do persistence profile
                 history_subset = df_history.loc[last_mask, col]
-                if len(history_subset) >= 24:
-                    # Extract last 24 hours profile
-                    profile_24 = history_subset.tail(24).values
-                    forecast_vals = [profile_24[i % 24] for i in range(forecast_horizon_hrs)]
+                n_profile = min(len(history_subset), 96) # up to 1 day
+                if n_profile >= 4:
+                    profile = history_subset.tail(n_profile).values
+                    forecast_vals = [profile[i % n_profile] for i in range(T_horizon)]
                 else:
-                    # Just repeat the last single value
-                    forecast_vals = [history_subset.iloc[-1]] * forecast_horizon_hrs
+                    forecast_vals = [history_subset.iloc[-1]] * T_horizon
                 forecast_df[col] = forecast_vals
 
         return forecast_df
