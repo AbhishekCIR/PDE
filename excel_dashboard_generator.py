@@ -2,9 +2,10 @@
 """
 Production-Grade Formula-Linked Excel Exporter with Executive Dashboard for BESS Optimization
 Generates an interactive, audit-ready Excel workbook with:
-  1. 'Dashboard': Executive KPI scorecards, Revenue Stack Table, Monthly Breakdown with live SUMIFS.
-  2. '8760_Dispatch_Results': Hourly dispatch with LIVE Excel formulas in all revenue and cost columns.
-  3. 'Inputs': Named/referenced system & financial assumptions.
+  1. 'Dashboard': Executive KPI scorecards, Revenue Stack Table, Monthly Breakdown with live SUMIFS,
+     and RIE WDT Demand Charge Breakdown table.
+  2. '8760_Dispatch_Results': Hourly dispatch with LIVE Excel formulas in all revenue, cost, and WDT columns.
+  3. 'Inputs': Named/referenced system & financial assumptions including RIE Tariff No. 3 rates.
   4. 'Tranche_Settings': User-defined tranche parameters.
 """
 
@@ -12,6 +13,7 @@ import io
 import pandas as pd
 import numpy as np
 import xlsxwriter
+
 
 def export_bess_dashboard_excel(
     df_results: pd.DataFrame,
@@ -24,7 +26,8 @@ def export_bess_dashboard_excel(
     deg_cost: float,
     mileage_factor: float,
     tranches: list = None,
-    market_name: str = "PJM"
+    market_name: str = "PJM",
+    wdt_df: pd.DataFrame = None,
 ) -> bytes:
     output = io.BytesIO()
     workbook = xlsxwriter.Workbook(output, {'in_memory': True})
@@ -32,7 +35,7 @@ def export_bess_dashboard_excel(
     # ---------------------------------------------------------
     # STYLES & FORMATS
     # ---------------------------------------------------------
-    title_fmt = workbook.add_format({'bold': True, 'font_size': 15, 'font_color': '#1E293B'})
+    title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1E293B'})
     subtitle_fmt = workbook.add_format({'font_size': 10, 'font_color': '#64748B'})
     
     header_navy = workbook.add_format({
@@ -47,17 +50,25 @@ def export_bess_dashboard_excel(
         'bold': True, 'font_color': 'white', 'bg_color': '#059669',
         'border': 1, 'align': 'center', 'valign': 'vcenter'
     })
+    header_purple = workbook.add_format({
+        'bold': True, 'font_color': 'white', 'bg_color': '#7C3AED',
+        'border': 1, 'align': 'center', 'valign': 'vcenter'
+    })
     
     kpi_card_lbl = workbook.add_format({
         'font_size': 8, 'font_color': '#475569', 'bg_color': '#F1F5F9',
         'border': 1, 'align': 'center', 'bold': True
     })
     kpi_card_val = workbook.add_format({
-        'font_size': 13, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC',
+        'font_size': 12, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC',
         'border': 1, 'align': 'center', 'num_format': '$#,##0'
     })
+    kpi_card_val_neg = workbook.add_format({
+        'font_size': 12, 'bold': True, 'font_color': '#DC2626', 'bg_color': '#F8FAFC',
+        'border': 1, 'align': 'center', 'num_format': '-$#,##0'
+    })
     kpi_card_val_num = workbook.add_format({
-        'font_size': 13, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC',
+        'font_size': 12, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC',
         'border': 1, 'align': 'center', 'num_format': '#,##0.00'
     })
     
@@ -65,9 +76,21 @@ def export_bess_dashboard_excel(
     currency_bold = workbook.add_format({'bold': True, 'num_format': '$#,##0.00', 'border': 1, 'bg_color': '#F8FAFC'})
     pct_fmt = workbook.add_format({'num_format': '0.0%', 'border': 1})
     num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+    kw_fmt = workbook.add_format({'num_format': '#,##0.0', 'border': 1})
     date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd hh:mm', 'border': 1})
     text_fmt = workbook.add_format({'border': 1})
     bold_fmt = workbook.add_format({'bold': True, 'border': 1})
+
+    has_wdt = (market_name == "ISO-NE") or ('WDT_Demand_Cost' in df_results.columns) or (metrics.get('WDT Annual Demand Charges ($)', 0.0) > 0)
+    
+    # Auto-calculate WDT monthly summary if needed
+    if has_wdt and (wdt_df is None or (hasattr(wdt_df, 'empty') and wdt_df.empty)):
+        try:
+            from market_isone import ISONE_Optimizer
+            tmp_opt = ISONE_Optimizer()
+            wdt_df = tmp_opt.calculate_wdt_demand_charges(df_results)
+        except Exception:
+            wdt_df = None
 
     # =========================================================
     # 1. INPUTS WORKSHEET
@@ -75,7 +98,7 @@ def export_bess_dashboard_excel(
     ws_in = workbook.add_worksheet('Inputs')
     ws_in.set_column('A:A', 28)
     ws_in.set_column('B:B', 16)
-    ws_in.set_column('C:C', 50)
+    ws_in.set_column('C:C', 55)
     
     ws_in.write('A1', 'System Parameter', header_navy)
     ws_in.write('B1', 'Value', header_navy)
@@ -98,6 +121,10 @@ def export_bess_dashboard_excel(
         inputs_data.append(('Capacity_Framework', metrics.get('Capacity Market Framework', 'Seasonal (2028+ CAR Reform)'), 'ISO-NE Capacity Market Structure'))
         inputs_data.append(('PfP_Scarcity_Safeguard', metrics.get('PfP Scarcity Safeguard', 'Active (15% SoC Buffer)'), 'Emergency 15% SoC Buffer against $9,337/MWh penalty'))
         inputs_data.append(('WDT_Tariff', 'RI Energy Tariff No. 3', 'Wholesale Distribution Tariff (On-Peak No-Charge)'))
+        inputs_data.append(('WDT_OnPeak_Rate', 10.55, 'RIE On-Peak Demand Charge ($/kW-month) [Weekdays 14:00-19:00]'))
+        inputs_data.append(('WDT_MidPeak_Rate', 1.35, 'RIE Mid-Peak Demand Charge ($/kW-month) [Weekdays 13-14, 19-20; Weekends 13-20]'))
+        inputs_data.append(('WDT_OffPeak_Rate', 0.53, 'RIE Off-Peak Demand Charge ($/kW-month) [All Other Hours]'))
+        inputs_data.append(('WDT_Customer_Charge', 32.82, 'RIE Monthly Customer Account Charge ($/month)'))
     
     for idx, (param, val, desc) in enumerate(inputs_data, start=2):
         ws_in.write(f'A{idx}', param, text_fmt)
@@ -132,7 +159,10 @@ def export_bess_dashboard_excel(
     cols_order += ['Synch_MW', 'SOC_MWh', 'SOC_Pct', 'Energy_Revenue']
     if has_multi_tranches:
         cols_order += tranche_rev_cols
-    cols_order += ['Regulation_Revenue', 'SYNCH_Revenue', 'Capacity_Revenue', 'Total_Degradation_Cost', 'Net_Merchant_Revenue', 'Operating_Mode']
+    cols_order += ['Regulation_Revenue', 'SYNCH_Revenue', 'Capacity_Revenue', 'Total_Degradation_Cost']
+    if has_wdt:
+        cols_order.append('WDT_Demand_Cost')
+    cols_order += ['Net_Merchant_Revenue', 'Operating_Mode']
     
     for c in cols_order:
         header_col_map[c] = col_idx
@@ -165,17 +195,9 @@ def export_bess_dashboard_excel(
         elif 'Reg_Effective_Price' in df_results.columns:
             reg_p_val = float(df_results['Reg_Effective_Price'].iloc[i])
         elif 'Price_RegUp' in df_results.columns:
-            # ISO-NE two-part formula: RMCCP + (Mileage_Ratio * RMPCP)
             p_up = float(df_results['Price_RegUp'].iloc[i])
             p_svc = float(df_results['Price_Reg_Service'].iloc[i]) if 'Price_Reg_Service' in df_results.columns else 0.0
             reg_p_val = p_up + (4.0 * p_svc)
-        elif 'RMCCP_D' in df_results.columns:
-            rmpcp_d = float(df_results['RMPCP_D'].iloc[i]) if 'RMPCP_D' in df_results.columns else 2.5
-            reg_p_val = float(df_results['RMCCP_D'].iloc[i] * 0.95 + rmpcp_d * 3.2 * 0.95)
-        elif 'RMCCP' in df_results.columns:
-            mileage = float(df_results['Mileage'].iloc[i]) if 'Mileage' in df_results.columns else 3.2
-            rmpcp = float(df_results['RMPCP'].iloc[i]) if 'RMPCP' in df_results.columns else 2.5
-            reg_p_val = float(df_results['RMCCP'].iloc[i] * 0.95 + rmpcp * mileage * 0.95)
         else:
             reg_p_val = 30.0
             
@@ -216,7 +238,7 @@ def export_bess_dashboard_excel(
             last_t_col = xlsxwriter.utility.xl_col_to_name(header_col_map[tranche_cols[-1]])
             ws_disp.write_formula(i+1, header_col_map['Total_Reg_MW'], f'=SUM({first_t_col}{r}:{last_t_col}{r})', num_fmt)
         else:
-            tot_reg_val = float(df_results['Total_Reg_MW'].iloc[i]) if 'Total_Reg_MW' in df_results.columns else (float(df_results['Regulation_MW'].iloc[i]) if 'Regulation_MW' in df_results.columns else 0.0)
+            tot_reg_val = float(df_results['Total_Reg_MW'].iloc[i]) if 'Total_Reg_MW' in df_results.columns else (float(df_results['RegUp_MW'].iloc[i]) if 'RegUp_MW' in df_results.columns else (float(df_results['Regulation_MW'].iloc[i]) if 'Regulation_MW' in df_results.columns else 0.0))
             ws_disp.write_number(i+1, header_col_map['Total_Reg_MW'], tot_reg_val, num_fmt)
             
         if 'Synch_MW' in df_results.columns:
@@ -274,16 +296,26 @@ def export_bess_dashboard_excel(
         deg_val = float(df_results['Total_Degradation_Cost'].iloc[i]) if 'Total_Degradation_Cost' in df_results.columns else 0.0
         ws_disp.write_formula(i+1, header_col_map['Total_Degradation_Cost'], f'=({col_c}{r}*Inputs!$B$10+{col_d}{r}/Inputs!$B$11)*Inputs!$B$7+({col_tot_reg}{r}*Inputs!$B$7*Inputs!$B$8)', currency_fmt, value=deg_val)
         
+        # WDT Demand Cost (if applicable)
+        wdt_cost_val = 0.0
+        if has_wdt:
+            wdt_cost_val = float(df_results['WDT_Demand_Cost'].iloc[i]) if 'WDT_Demand_Cost' in df_results.columns else 0.0
+            ws_disp.write_number(i+1, header_col_map['WDT_Demand_Cost'], wdt_cost_val, currency_fmt)
+        
         # LIVE FORMULA: Net Merchant Revenue
         col_e_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['Energy_Revenue'])
         col_r_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['Regulation_Revenue'])
         col_s_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['SYNCH_Revenue'])
         col_cap_rev = xlsxwriter.utility.xl_col_to_name(header_col_map['Capacity_Revenue'])
         col_deg = xlsxwriter.utility.xl_col_to_name(header_col_map['Total_Degradation_Cost'])
-        # Net revenue must strictly equal the sum of component formula columns
-        net_val = round(ene_val + reg_val + synch_rev_val + cap_rev_val - deg_val, 4)
         
-        ws_disp.write_formula(i+1, header_col_map['Net_Merchant_Revenue'], f'={col_e_rev}{r}+{col_r_rev}{r}+{col_s_rev}{r}+{col_cap_rev}{r}-{col_deg}{r}', currency_fmt, value=net_val)
+        if has_wdt:
+            col_wdt = xlsxwriter.utility.xl_col_to_name(header_col_map['WDT_Demand_Cost'])
+            net_val = round(ene_val + reg_val + synch_rev_val + cap_rev_val - deg_val - wdt_cost_val, 4)
+            ws_disp.write_formula(i+1, header_col_map['Net_Merchant_Revenue'], f'={col_e_rev}{r}+{col_r_rev}{r}+{col_s_rev}{r}+{col_cap_rev}{r}-{col_deg}{r}-{col_wdt}{r}', currency_fmt, value=net_val)
+        else:
+            net_val = round(ene_val + reg_val + synch_rev_val + cap_rev_val - deg_val, 4)
+            ws_disp.write_formula(i+1, header_col_map['Net_Merchant_Revenue'], f'={col_e_rev}{r}+{col_r_rev}{r}+{col_s_rev}{r}+{col_cap_rev}{r}-{col_deg}{r}', currency_fmt, value=net_val)
         
         # Mode string
         if 'Operating_Mode' in df_results.columns:
@@ -298,17 +330,18 @@ def export_bess_dashboard_excel(
     # 3. EXECUTIVE DASHBOARD WORKSHEET (LIVE FORMULAS)
     # =========================================================
     ws_dash = workbook.add_worksheet('Dashboard')
-    ws_dash.set_column('A:A', 4)
+    ws_dash.set_column('A:A', 3)
     ws_dash.set_column('B:B', 32)
     ws_dash.set_column('C:C', 20)
     ws_dash.set_column('D:D', 20)
     ws_dash.set_column('E:E', 20)
     ws_dash.set_column('F:F', 20)
     ws_dash.set_column('G:G', 20)
+    ws_dash.set_column('H:H', 20)
 
     # Title & Header
     ws_dash.write('B2', f'⚡ {market_name} BESS Optimization & Revenue Stacking Dashboard', title_fmt)
-    ws_dash.write('B3', f'Asset: {power_mw:.0f} MW / {power_mw*duration_hr:.0f} MWh | Market: {market_name} | Simulation: {num_rows} Hours', subtitle_fmt)
+    ws_dash.write('B3', f'Asset: {power_mw:.1f} MW / {power_mw*duration_hr:.1f} MWh | Market: {market_name} | Simulation: {num_rows} Hours', subtitle_fmt)
 
     # Top KPI Cards
     col_net_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Net_Merchant_Revenue'])
@@ -319,17 +352,21 @@ def export_bess_dashboard_excel(
     col_deg_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Total_Degradation_Cost'])
     col_d_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Discharge_MW'])
     col_c_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['Charge_MW'])
+    if has_wdt:
+        col_wdt_ltr = xlsxwriter.utility.xl_col_to_name(header_col_map['WDT_Demand_Cost'])
 
     reg_total = float(metrics.get('Regulation Revenue ($)', 0.0))
     cap_total = float(metrics.get('Static Capacity Revenue ($)', 0.0))
     ene_total = float(metrics.get('Energy Arbitrage Revenue ($)', 0.0))
     syn_total = float(metrics.get('SYNCH Revenue ($)', 0.0))
     deg_total = float(metrics.get('Degradation Expense ($)', 0.0))
+    wdt_total = float(metrics.get('WDT Annual Demand Charges ($)', 0.0))
     gross_total = reg_total + cap_total + ene_total + syn_total
-    net_operating_total = gross_total - deg_total
+    net_operating_total = gross_total - deg_total - (wdt_total if has_wdt else 0.0)
 
+    net_row_ref = '20' if has_wdt else '19'
     ws_dash.write('B5', 'NET MERCHANT REVENUE', kpi_card_lbl)
-    ws_dash.write_formula('B6', '=C19', kpi_card_val, value=net_operating_total)
+    ws_dash.write_formula('B6', f'=C{net_row_ref}', kpi_card_val, value=net_operating_total)
 
     ws_dash.write('C5', 'REGULATION REVENUE', kpi_card_lbl)
     ws_dash.write_formula('C6', f"=SUM('8760_Dispatch_Results'!{col_reg_ltr}2:{col_reg_ltr}{num_rows+1})", kpi_card_val, value=reg_total)
@@ -344,7 +381,11 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('F6', f"=SUM('8760_Dispatch_Results'!{col_syn_ltr}2:{col_syn_ltr}{num_rows+1})", kpi_card_val, value=syn_total)
 
     ws_dash.write('G5', 'DEGRADATION EXPENSE', kpi_card_lbl)
-    ws_dash.write_formula('G6', f"=SUM('8760_Dispatch_Results'!{col_deg_ltr}2:{col_deg_ltr}{num_rows+1})", kpi_card_val, value=deg_total)
+    ws_dash.write_formula('G6', f"=SUM('8760_Dispatch_Results'!{col_deg_ltr}2:{col_deg_ltr}{num_rows+1})", kpi_card_val_neg, value=-deg_total)
+
+    if has_wdt:
+        ws_dash.write('H5', 'WDT DEMAND CHARGES', kpi_card_lbl)
+        ws_dash.write_formula('H6', f"=SUM('8760_Dispatch_Results'!{col_wdt_ltr}2:{col_wdt_ltr}{num_rows+1})", kpi_card_val_neg, value=-wdt_total)
 
     # Operational Cards
     tot_d_mwh = float(metrics.get('Total Discharged (MWh)', (df_results['discharge_mw'].sum() if 'discharge_mw' in df_results.columns else 0.0)))
@@ -362,29 +403,29 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('D9', f"=SUM('8760_Dispatch_Results'!{col_c_ltr}2:{col_c_ltr}{num_rows+1})", kpi_card_val_num, value=tot_c_mwh)
 
     ws_dash.write('E8', 'ACHIEVED ROUND-TRIP EFF.', kpi_card_lbl)
-    ws_dash.write_formula('E9', f'=IF(D9>0, C9/D9, 0)', workbook.add_format({'font_size': 13, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC', 'border': 1, 'align': 'center', 'num_format': '0.0%'}), value=rte_val)
+    ws_dash.write_formula('E9', '=IF(D9>0, C9/D9, 0)', workbook.add_format({'font_size': 12, 'bold': True, 'font_color': '#0F172A', 'bg_color': '#F8FAFC', 'border': 1, 'align': 'center', 'num_format': '0.0%'}), value=rte_val)
 
-    # TABLE 1: REVENUE STACK SUMMARY TABLE (Rows 12-19)
+    # TABLE 1: REVENUE STACK SUMMARY TABLE (Rows 12-20)
     ws_dash.write('B12', 'Revenue Stream', header_blue)
     ws_dash.write('C12', 'Annual Revenue ($)', header_blue)
     ws_dash.write('D12', 'Share of Gross (%)', header_blue)
     
     ws_dash.write('B13', 'Frequency Regulation', text_fmt)
-    ws_dash.write_formula('C13', '=C6', currency_fmt, value=float(metrics.get('Regulation Revenue ($)', 0.0)))
+    ws_dash.write_formula('C13', '=C6', currency_fmt, value=reg_total)
     ws_dash.write_formula('D13', '=C13/$C$17', pct_fmt)
 
     cap_mkt_title = 'ISO-NE Capacity Market (CAR)' if market_name == "ISO-NE" else ('PJM RPM Capacity Market' if market_name == "PJM" else 'Capacity Market')
     ws_dash.write('B14', cap_mkt_title, text_fmt)
-    ws_dash.write_formula('C14', '=E6', currency_fmt, value=float(metrics.get('Static Capacity Revenue ($)', 0.0)))
+    ws_dash.write_formula('C14', '=E6', currency_fmt, value=cap_total)
     ws_dash.write_formula('D14', '=C14/$C$17', pct_fmt)
 
     ws_dash.write('B15', 'Energy Arbitrage', text_fmt)
-    ws_dash.write_formula('C15', '=D6', currency_fmt, value=float(metrics.get('Energy Arbitrage Revenue ($)', 0.0)))
+    ws_dash.write_formula('C15', '=D6', currency_fmt, value=ene_total)
     ws_dash.write_formula('D15', '=C15/$C$17', pct_fmt)
 
     res_title = 'Spinning & Non-Spin Reserves' if market_name == "ISO-NE" else 'Synchronized Reserves'
     ws_dash.write('B16', res_title, text_fmt)
-    ws_dash.write_formula('C16', '=F6', currency_fmt, value=float(metrics.get('SYNCH Revenue ($)', 0.0)))
+    ws_dash.write_formula('C16', '=F6', currency_fmt, value=syn_total)
     ws_dash.write_formula('D16', '=C16/$C$17', pct_fmt)
         
     ws_dash.write('B17', 'Total Gross Merchant Revenue', bold_fmt)
@@ -395,11 +436,20 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('C18', '=-G6', currency_fmt, value=-deg_total)
     ws_dash.write('D18', '-', text_fmt)
 
-    ws_dash.write('B19', 'NET MERCHANT OPERATING REVENUE', bold_fmt)
-    ws_dash.write_formula('C19', '=C17+C18', currency_bold, value=net_operating_total)
-    ws_dash.write('D19', '-', text_fmt)
+    if has_wdt:
+        ws_dash.write('B19', 'Less: RIE Wholesale Distribution Tariff (WDT)', text_fmt)
+        ws_dash.write_formula('C19', '=-H6', currency_fmt, value=-wdt_total)
+        ws_dash.write('D19', '-', text_fmt)
 
-    # TABLE 2: MONTHLY BREAKDOWN TABLE (Rows 22-35)
+        ws_dash.write('B20', 'NET MERCHANT OPERATING REVENUE', bold_fmt)
+        ws_dash.write_formula('C20', '=C17+C18+C19', currency_bold, value=net_operating_total)
+        ws_dash.write('D20', '-', text_fmt)
+    else:
+        ws_dash.write('B19', 'NET MERCHANT OPERATING REVENUE', bold_fmt)
+        ws_dash.write_formula('C19', '=C17+C18', currency_bold, value=net_operating_total)
+        ws_dash.write('D19', '-', text_fmt)
+
+    # TABLE 2: MONTHLY BREAKDOWN TABLE (Rows 23-36)
     ws_dash.write('B22', 'Month', header_emerald)
     ws_dash.write('C22', 'Energy ($)', header_emerald)
     ws_dash.write('D22', 'Regulation ($)', header_emerald)
@@ -432,6 +482,54 @@ def export_bess_dashboard_excel(
     ws_dash.write_formula('E35', '=SUM(E23:E34)', currency_bold)
     ws_dash.write_formula('F35', '=SUM(F23:F34)', currency_bold)
     ws_dash.write_formula('G35', '=SUM(G23:G34)', currency_bold)
+
+    # TABLE 3: RIE WDT MONTHLY DEMAND CHARGE BREAKDOWN TABLE (Electric Tariff No. 3)
+    if has_wdt:
+        ws_dash.write('B38', '🔌 RIE Wholesale Distribution Tariff (WDT) Demand Charge Breakdown (Electric Tariff No. 3)', title_fmt)
+        ws_dash.write('B39', 'Month', header_purple)
+        ws_dash.write('C39', 'On-Peak Max kW ($10.55)', header_purple)
+        ws_dash.write('D39', 'Mid-Peak Max kW ($1.35)', header_purple)
+        ws_dash.write('E39', 'Off-Peak Max kW ($0.53)', header_purple)
+        ws_dash.write('F39', 'Customer Charge ($32.82)', header_purple)
+        ws_dash.write('G39', 'Total Monthly WDT ($)', header_purple)
+
+        for m_idx, m_name in enumerate(months, start=1):
+            r_w = 39 + m_idx
+            ym_str = f"{year_val}-{m_idx:02d}"
+            
+            # Lookup monthly WDT values
+            onpeak_kw = 0.0
+            midpeak_kw = 0.0
+            offpeak_kw = 0.0
+            cust_charge = 32.82
+            monthly_wdt = 32.82
+            
+            if wdt_df is not None and len(wdt_df) > 0:
+                row_match = wdt_df[wdt_df['year_month'].astype(str) == ym_str]
+                if len(row_match) > 0:
+                    onpeak_kw = float(row_match['OnPeak_Max_kW'].iloc[0])
+                    midpeak_kw = float(row_match['MidPeak_Max_kW'].iloc[0])
+                    offpeak_kw = float(row_match['OffPeak_Max_kW'].iloc[0])
+                    monthly_wdt = float(row_match['WDT_Demand_Charge'].iloc[0])
+
+            ws_dash.write(f'B{r_w}', m_name, text_fmt)
+            ws_dash.write_number(f'C{r_w}', onpeak_kw, kw_fmt)
+            ws_dash.write_number(f'D{r_w}', midpeak_kw, kw_fmt)
+            ws_dash.write_number(f'E{r_w}', offpeak_kw, kw_fmt)
+            ws_dash.write_number(f'F{r_w}', cust_charge, currency_fmt)
+            ws_dash.write_formula(
+                f'G{r_w}',
+                f'=F{r_w} + (C{r_w}*Inputs!$B$16) + (D{r_w}*Inputs!$B$17) + (E{r_w}*Inputs!$B$18)',
+                currency_bold,
+                value=monthly_wdt
+            )
+
+        ws_dash.write('B52', 'Full Year Total', bold_fmt)
+        ws_dash.write_formula('C52', '=MAX(C40:C51)', kw_fmt)
+        ws_dash.write_formula('D52', '=MAX(D40:D51)', kw_fmt)
+        ws_dash.write_formula('E52', '=MAX(E40:E51)', kw_fmt)
+        ws_dash.write_formula('F52', '=SUM(F40:F51)', currency_fmt)
+        ws_dash.write_formula('G52', '=SUM(G40:G51)', currency_bold)
 
     # =========================================================
     # 4. TRANCHE SETTINGS WORKSHEET

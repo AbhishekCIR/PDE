@@ -380,8 +380,10 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         dur_reg = self.config.get("reserve_durations", {}).get("Reg", 0.50)
 
         for t in range(T_day):
-            # Regulation capacity ceiling (combined up+dn)
-            prob += reg_up[t] + reg_dn[t] <= self.max_reg_mw
+            # ISO-NE Frequency Regulation is a symmetrical capacity product (Market Rule 1 Section III.14.2)
+            prob += reg_up[t] == reg_dn[t]
+            prob += reg_up[t] <= self.max_reg_mw
+            prob += reg_dn[t] <= self.max_reg_mw
 
             # Shared inverter / power headroom
             prob += (
@@ -389,12 +391,12 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             )
             prob += c[t] + reg_dn[t] <= self.power_mw
             prob += (
-                spin[t] + nonspin[t] + reg_up[t] + reg_dn[t] <= self.power_mw
+                spin[t] + nonspin[t] + reg_up[t] <= self.power_mw
             )
 
             # SoC headroom for regulation & reserves
             as_energy = (
-                (reg_up[t] + reg_dn[t]) * dur_reg
+                reg_up[t] * dur_reg
                 + spin[t] * dur_spin
                 + nonspin[t] * dur_nonspin
             )
@@ -411,7 +413,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
             target_floor_pct = self.pfp_min_soc_pct if (self.enable_pfp_protection and is_pfp_risk) else 0.10
             prob += soc[t] >= (target_floor_pct * self.energy_mwh) + as_energy * timestep_hours
             prob += soc[t] <= (0.90 * self.energy_mwh) - (
-                (reg_up[t] + reg_dn[t]) * dur_reg * timestep_hours
+                as_energy * timestep_hours
             )
 
             # HARD CONSTRAINT: no charging during weekday on-peak (WDT)
@@ -458,17 +460,18 @@ class ISONE_Optimizer(BESS_Simulator_Base):
 
         terms = []
         for t in range(T_day):
+            # ISO-NE single symmetric regulation capability settlement
             reg_cap_rev = (
-                reg_up[t] * price_reg_up[t] + reg_dn[t] * price_reg_dn[t]
+                reg_up[t] * price_reg_up[t]
             ) * timestep_hours
             reg_mileage = (
-                (reg_up[t] + reg_dn[t])
+                reg_up[t]
                 * price_reg_svc[t]
                 * self.mileage_factor
                 * timestep_hours
             )
             reg_deg = (
-                (reg_up[t] + reg_dn[t])
+                reg_up[t]
                 * self.reg_throughput_factor
                 * self.deg_cost
                 * timestep_hours
@@ -486,7 +489,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         reg_dn = [subclass_vars["reg_dn"][t].varValue or 0.0 for t in day_indices]
         spin = [subclass_vars["spin"][t].varValue or 0.0 for t in day_indices]
         nonspin = [subclass_vars["nonspin"][t].varValue or 0.0 for t in day_indices]
-        total_reg = [u + d for u, d in zip(reg_up, reg_dn)]
+        total_reg = [float(u) for u in reg_up]  # Awarded symmetric regulation capability (MW)
         return {
             "RegUp_MW": reg_up,
             "RegDn_MW": reg_dn,
@@ -570,7 +573,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         nonspin = df_out["NonSpin_MW"] if "NonSpin_MW" in df_out.columns else 0.0
 
         if "Total_Reg_MW" not in df_out.columns:
-            df_out["Total_Reg_MW"] = reg_up + reg_dn
+            df_out["Total_Reg_MW"] = reg_up
 
         # ISO-NE FERC Order 755 Two-Part Regulation Settlement:
         # Effective Regulation Rate ($/MW-hr) = RMCCP (Capacity) + [Mileage_Ratio * RMPCP (Service)]
@@ -578,16 +581,16 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         df_out["Reg_Price"] = reg_rate
         df_out["Reg_Effective_Price"] = reg_rate
 
-        reg_cap_rev = (reg_up * price_reg_up + reg_dn * price_reg_dn) * timestep_hours
+        reg_cap_rev = df_out["Total_Reg_MW"] * price_reg_up * timestep_hours
         reg_mileage = (
-            (reg_up + reg_dn) * price_reg_svc * self.mileage_factor * timestep_hours
+            df_out["Total_Reg_MW"] * price_reg_svc * self.mileage_factor * timestep_hours
         )
         # Gross Regulation Market Revenue earned from ISO-NE:
         df_out["Regulation_Revenue"] = reg_cap_rev + reg_mileage
 
         # Regulation cell degradation wear cost ($/hr) = Reg_MW * reg_throughput_factor * deg_cost * dt
         reg_deg = (
-            (reg_up + reg_dn) * self.reg_throughput_factor * self.deg_cost * timestep_hours
+            df_out["Total_Reg_MW"] * self.reg_throughput_factor * self.deg_cost * timestep_hours
         )
         df_out["Reg_Degradation_Cost"] = reg_deg
 

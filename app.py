@@ -814,7 +814,8 @@ if st.session_state['data_df'] is not None:
                     deg_cost=deg_cost,
                     mileage_factor=reg_wear_factor,
                     tranches=pjm_user_tranches if (selected_market == "PJM" and enable_pjm_tranches) else None,
-                    market_name=selected_market
+                    market_name=selected_market,
+                    wdt_df=getattr(optimizer, '_wdt_monthly_df', None)
                 )
 
                 # Persist results in session_state so clicking Download or tabs never causes results to disappear!
@@ -879,17 +880,32 @@ if st.session_state.get('opt_results') is not None:
         )
 
     # Metric Cards
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
-    c2.metric("Energy Arbitrage Revenue", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
-    c3.metric("Ancillary Services Revenue", f"${metrics['Ancillary Services Revenue ($)']:,.2f}")
-    c4.metric("Capacity Revenue (Compliance)", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
-    
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Degradation Cost", f"-${metrics['Degradation Expense ($)']:,.2f}")
-    c6.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f} cycles")
-    c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
-    c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
+    is_isone_wdt = (market_res_name == "ISO-NE" and res.get('apply_wdt_charges', False))
+    if is_isone_wdt:
+        gross_rev = metrics['Energy Arbitrage Revenue ($)'] + metrics['Ancillary Services Revenue ($)'] + metrics['Static Capacity Revenue ($)']
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
+        c2.metric("Gross Market Revenue", f"${gross_rev:,.2f}")
+        c3.metric("Degradation OPEX", f"-${metrics['Degradation Expense ($)']:,.2f}")
+        c4.metric("WDT Tariff Charges", f"-${metrics.get('WDT Annual Demand Charges ($)', 0.0):,.2f}")
+        
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("Frequency Regulation", f"${metrics.get('Regulation Revenue ($)', metrics['Ancillary Services Revenue ($)']):,.2f}")
+        c6.metric("Energy Arbitrage", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
+        c7.metric("Achieved RTE", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
+        c8.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f} cycles")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Net Merchant Revenue", f"${metrics['Total Net Merchant Revenue ($)']:,.2f}")
+        c2.metric("Energy Arbitrage Revenue", f"${metrics['Energy Arbitrage Revenue ($)']:,.2f}")
+        c3.metric("Ancillary Services Revenue", f"${metrics['Ancillary Services Revenue ($)']:,.2f}")
+        c4.metric("Capacity Revenue (Compliance)", f"${metrics['Static Capacity Revenue ($)']:,.2f}")
+        
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("Degradation Cost", f"-${metrics['Degradation Expense ($)']:,.2f}")
+        c6.metric("Equivalent Full Cycles", f"{metrics['Equivalent Full Cycles (EFC)']:,.2f} cycles")
+        c7.metric("Achieved Round-Trip Efficiency", f"{metrics['Achieved Round-Trip Efficiency']*100:.1f}%")
+        c8.metric("AS Participation Fraction", f"{metrics['Ancillary Participation Fraction']*100:.1f}%")
 
     # Tranche Breakdown Metrics
     if market_res_name == "PJM" and enable_tr_res and tr_res:
@@ -907,20 +923,48 @@ if st.session_state.get('opt_results') is not None:
                     delta=f"Avg Cleared: {avg_cleared:.1f} MW"
                 )
 
-    # ISO-NE WDT Demand Charge Breakdown
+    # ISO-NE WDT Demand Charge Breakdown (Electric Tariff No. 3)
     if market_res_name == "ISO-NE" and res.get('apply_wdt_charges', False):
         st.markdown("---")
-        st.subheader("🔌 WDT Demand Charge Breakdown (Narragansett Electric Tariff No. 3)")
+        st.subheader("🔌 Rhode Island Energy (RIE) WDT Demand Charge Breakdown (Electric Tariff No. 3)")
+        st.markdown(
+            "Under FERC-approved **RIE Wholesale Distribution Tariff (WDT)**, monthly billing demand is measured by the single highest 15-minute metered charging demand (kW) per period:\n"
+            "* **On-Peak ($10.55/kW-month):** Weekdays 14:00–19:00 *(Hard-blocked: zero charging permitted)*\n"
+            "* **Mid-Peak ($1.35/kW-month):** Weekdays 13:00–14:00 & 19:00–20:00; Weekends/Holidays 13:00–20:00\n"
+            "* **Off-Peak ($0.53/kW-month):** All other hours (overnight/morning charging)\n"
+            "* **Customer Charge:** $32.82/month"
+        )
         wdt_df = res.get('optimizer_wdt')
         if wdt_df is None or (hasattr(wdt_df, 'empty') and wdt_df.empty):
-            # Recompute from dispatch if not stored
             tmp_opt = ISONE_Optimizer()
             wdt_df = tmp_opt.calculate_wdt_demand_charges(df_opt)
-        st.dataframe(wdt_df, use_container_width=True)
-        wdt_total = metrics.get('WDT Annual Demand Charges ($)', wdt_df['WDT_Demand_Charge'].sum() if wdt_df is not None and len(wdt_df) else 0.0)
-        c_w1, c_w2 = st.columns(2)
-        c_w1.metric("Total WDT Demand Charges", f"${wdt_total:,.2f}")
-        c_w2.metric("On-Peak Charging Hours", f"{metrics.get('On-Peak Charging Hours', 0):.2f} (must be 0)")
+            
+        wdt_total = float(metrics.get('WDT Annual Demand Charges ($)', wdt_df['WDT_Demand_Charge'].sum() if wdt_df is not None and len(wdt_df) else 0.0))
+        max_onpeak = float(wdt_df['OnPeak_Max_kW'].max()) if wdt_df is not None and len(wdt_df) else 0.0
+        max_midpeak = float(wdt_df['MidPeak_Max_kW'].max()) if wdt_df is not None and len(wdt_df) else 0.0
+        max_offpeak = float(wdt_df['OffPeak_Max_kW'].max()) if wdt_df is not None and len(wdt_df) else 0.0
+        
+        cw1, cw2, cw3, cw4 = st.columns(4)
+        cw1.metric("Annual WDT Bill", f"${wdt_total:,.2f}")
+        cw2.metric("On-Peak Max kW ($10.55)", f"{max_onpeak:,.1f} kW", delta="0 kW (Protected)" if max_onpeak == 0 else "Penalty")
+        cw3.metric("Mid-Peak Max kW ($1.35)", f"{max_midpeak:,.1f} kW")
+        cw4.metric("Off-Peak Max kW ($0.53)", f"{max_offpeak:,.1f} kW")
+        
+        # Display formatted table
+        wdt_display = wdt_df.copy()
+        if 'OnPeak_Max_kW' in wdt_display.columns:
+            wdt_display['OnPeak_Max_kW'] = wdt_display['OnPeak_Max_kW'].map(lambda x: f"{x:,.1f} kW")
+            wdt_display['MidPeak_Max_kW'] = wdt_display['MidPeak_Max_kW'].map(lambda x: f"{x:,.1f} kW")
+            wdt_display['OffPeak_Max_kW'] = wdt_display['OffPeak_Max_kW'].map(lambda x: f"{x:,.1f} kW")
+            wdt_display['WDT_Demand_Charge'] = wdt_display['WDT_Demand_Charge'].map(lambda x: f"${x:,.2f}")
+            wdt_display.rename(columns={
+                'year_month': 'Billing Month',
+                'OnPeak_Max_kW': 'On-Peak Demand (kW)',
+                'MidPeak_Max_kW': 'Mid-Peak Demand (kW)',
+                'OffPeak_Max_kW': 'Off-Peak Demand (kW)',
+                'WDT_Demand_Charge': 'Monthly WDT Bill ($)'
+            }, inplace=True)
+        st.dataframe(wdt_display, use_container_width=True)
 
     # ISO-NE Capacity Market Breakdown (CAR 2028+ Reform)
     if market_res_name == "ISO-NE":
