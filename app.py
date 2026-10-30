@@ -170,18 +170,11 @@ if selected_market == "ISO-NE":
         help="Maintains an emergency 15% State-of-Charge buffer during peak risk hours to prevent catastrophic $9,337/MWh Pay-for-Performance penalties."
     )
 
-    uncap_reg = st.sidebar.checkbox(
-        "Uncap Regulation (100% Inverter Nameplate MW)",
-        value=True,
-        help="Allows the battery to allocate up to 100% of its inverter power to regulation without any artificial percentage cap."
+    isone_reg_cap_pct = st.sidebar.slider(
+        "Regulation Market Participation Cap (% of Inverter)",
+        min_value=10.0, max_value=100.0, value=35.0, step=5.0,
+        help="ISO-NE's regional regulation market is shallow (~60-80 MW). Setting a 30%-40% cap (1.35-1.80 MW) reflects realistic market depth and preserves 60%+ inverter headroom for daily energy arbitrage."
     )
-    if uncap_reg:
-        isone_reg_cap_pct = 100.0
-    else:
-        isone_reg_cap_pct = st.sidebar.slider(
-            "Regulation Capacity Ceiling (%)", min_value=0.0, max_value=100.0, value=20.0, step=5.0,
-            help="Custom ceiling on regulation capacity as a % of battery nameplate."
-        )
 
     isone_res_choice = st.sidebar.selectbox(
         "Data Resolution & WDT Modeling",
@@ -277,7 +270,7 @@ if selected_market == "PJM":
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 Operating Mode")
 operating_modes = ["Merchant Only", "Merchant + Capacity", "Merchant + VPP", "Tolling Agreement"]
-default_mode_idx = 1 if selected_market == "PJM" else 0
+default_mode_idx = 1 if selected_market in ["PJM", "ISO-NE"] else 0
 selected_mode = st.sidebar.selectbox("Select Business Model", options=operating_modes, index=default_mode_idx)
 
 vpp_reserve_mw = 0.0

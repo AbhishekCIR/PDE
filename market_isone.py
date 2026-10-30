@@ -75,7 +75,7 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         reg_throughput_factor: float = 0.15,
         is_tolling: bool = False,
         elcc_factor: float = None,
-        reg_cap_pct: float = 100.0,
+        reg_cap_pct: float = 35.0,
         enable_reserves: bool = True,
         apply_wdt_charges: bool = True,
         # CAR 2028+ Reform & Seasonal Parameters
@@ -208,8 +208,8 @@ class ISONE_Optimizer(BESS_Simulator_Base):
         return "offpeak"
 
     def _is_onpeak_no_charge(self, ts) -> bool:
-        """Weekday non-holiday 14:00–19:00 — hard no-charge window."""
-        return self._classify_period(ts) == "onpeak"
+        """True if charging is prohibited in this interval (blocks On-Peak and Mid-Peak to avoid WDT demand charges)."""
+        return self._classify_period(ts) in ["onpeak", "midpeak"]
 
     # ------------------------------------------------------------------
     # 15-minute resolution enforcement
@@ -411,9 +411,9 @@ class ISONE_Optimizer(BESS_Simulator_Base):
                     is_pfp_risk = True
 
             target_floor_pct = self.pfp_min_soc_pct if (self.enable_pfp_protection and is_pfp_risk) else 0.10
-            prob += soc[t] >= (target_floor_pct * self.energy_mwh) + as_energy * timestep_hours
+            prob += soc[t] >= (target_floor_pct * self.energy_mwh) + as_energy
             prob += soc[t] <= (0.90 * self.energy_mwh) - (
-                as_energy * timestep_hours
+                as_energy
             )
 
             # HARD CONSTRAINT: no charging during weekday on-peak (WDT)
